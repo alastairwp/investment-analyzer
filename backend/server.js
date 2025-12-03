@@ -463,7 +463,7 @@ async function analyzeWithAlphaVantage(ticker) {
       function: 'TIME_SERIES_DAILY',
       symbol: ticker,
       apikey: ALPHA_VANTAGE_KEY,
-      outputsize: 'compact'
+      outputsize: 'full'
     }
   });
   
@@ -538,6 +538,7 @@ async function analyzeWithAlphaVantage(ticker) {
     confidence,
     indicators: technical.indicators,
     signals: technical.signals,
+    advancedIndicators: technical.advancedIndicators,
     sentiment: null,
     historicalData: historicalData, // Send all available data
     lastUpdated: new Date().toISOString()

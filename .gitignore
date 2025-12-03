@@ -51,3 +51,9 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# Cache
+backend/.cache/
+
+# Documentation (tracked locally only)
+docs/
