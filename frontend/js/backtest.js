@@ -44,6 +44,7 @@ async function runBacktest() {
   const investment = parseFloat(document.getElementById('backtestInvestment').value);
   const startDate = document.getElementById('backtestStartDate').value;
   const endDate = document.getElementById('backtestEndDate').value;
+  const forceRefresh = document.getElementById('forceRefreshCache')?.checked || false;
 
   const percentStrongBuy = parseInt(document.getElementById('percentStrongBuy').value);
   const percentBuy = parseInt(document.getElementById('percentBuy').value);
@@ -75,6 +76,7 @@ async function runBacktest() {
     startDate,
     endDate,
     initialInvestment: investment,
+    forceRefresh,
     buyPercentages: {
       'STRONG BUY': percentStrongBuy,
       'BUY': percentBuy,
@@ -90,7 +92,10 @@ async function runBacktest() {
   try {
     console.log('Running backtest with config:', config);
 
-    const response = await fetch('http://localhost:3001/api/backtest', {
+    // Use the API_BASE_URL from api.js (assumes it's loaded first)
+    const API_URL = window.API_BASE_URL || 'http://localhost:3001/api';
+
+    const response = await fetch(`${API_URL}/backtest`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
@@ -120,6 +125,51 @@ function displayBacktestResults(data) {
 
   const summary = data.summary;
   const results = data.results;
+
+  // Check if summary has an error (all stocks failed)
+  if (summary.error) {
+    // Collect specific errors from failed stocks
+    const specificErrors = results
+      .filter(r => r.error)
+      .map(r => `<li><strong>${r.ticker}</strong>: ${r.error}</li>`)
+      .join('');
+
+    backtestResults.innerHTML = `
+      <div class="bg-red-50 dark:bg-red-900/20 border-2 border-red-300 dark:border-red-700 rounded-lg p-6">
+        <div class="text-center">
+          <div class="text-4xl mb-4">❌</div>
+          <h3 class="text-xl font-bold text-red-800 dark:text-red-300 mb-2">All Backtests Failed</h3>
+          <p class="text-red-700 dark:text-red-400 mb-4">${summary.error}</p>
+        </div>
+
+        <div class="text-left mt-6 bg-white dark:bg-gray-800 rounded p-4">
+          <p class="font-semibold text-gray-800 dark:text-gray-200 mb-2">Specific errors for each stock:</p>
+          <ul class="list-none space-y-1 text-sm text-gray-700 dark:text-gray-300">
+            ${specificErrors}
+          </ul>
+        </div>
+
+        <div class="text-sm text-gray-600 dark:text-gray-400 mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded">
+          <p class="font-semibold mb-2">💡 Common solutions:</p>
+          <ul class="list-disc list-inside space-y-1">
+            <li><strong>Invalid ticker:</strong> Use US stocks (e.g., AAPL, MSFT, GOOGL). UK stocks (.L) not supported on free tier.</li>
+            <li><strong>API rate limit:</strong> Free tier allows 5 calls/minute. Wait 60 seconds and try again.</li>
+            <li><strong>No data available:</strong> Try a more recent date range (e.g., last 1-2 months).</li>
+          </ul>
+        </div>
+
+        <div class="text-center mt-6">
+          <button
+            onclick="resetBacktestForm()"
+            class="px-6 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    `;
+    return;
+  }
 
   const html = `
     <!-- Summary Card -->
@@ -242,11 +292,30 @@ function displayBacktestResults(data) {
                       <div class="text-gray-900 dark:text-gray-100 font-medium">
                         £${(trade.action === 'BUY' ? trade.cost : trade.proceeds).toFixed(2)}
                       </div>
-                      <div class="text-gray-500 dark:text-gray-400">${trade.date}</div>
+                      ${trade.action === 'SELL' && trade.profitPercent !== undefined ? `
+                        <div class="text-xs font-semibold ${trade.profitPercent >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}">
+                          ${trade.profitPercent >= 0 ? '+' : ''}${trade.profitPercent.toFixed(1)}% (£${trade.profit >= 0 ? '+' : ''}${trade.profit.toFixed(2)})
+                        </div>
+                      ` : ''}
+                      <div class="text-gray-500 dark:text-gray-400 text-xs">${trade.datetime || trade.date}</div>
                     </div>
                   </div>
-                  <div class="text-gray-600 dark:text-gray-400 mt-1">
-                    ${trade.recommendation} (Score: ${trade.technicalScore})
+                  <div class="mt-2 pt-2 border-t ${trade.action === 'BUY' ? 'border-green-200 dark:border-green-800' : 'border-red-200 dark:border-red-800'}">
+                    <div class="font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      ${trade.recommendation} (Score: ${trade.technicalScore})
+                    </div>
+                    <div class="text-gray-700 dark:text-gray-300 text-xs mb-2 italic bg-white dark:bg-gray-700 p-2 rounded">
+                      ${trade.rationale}
+                    </div>
+                    <div class="text-gray-600 dark:text-gray-400 text-xs">
+                      <div class="font-medium mb-1">Technical Indicators:</div>
+                      <div class="grid grid-cols-2 gap-x-4 gap-y-1">
+                        <div>• RSI: ${trade.indicators.rsi}${getRSIIndicator(trade.indicators.rsi)}</div>
+                        <div>• MACD: ${trade.indicators.macd}${getMACDIndicator(trade.indicators.macd)}</div>
+                        <div>• SMA20: ${trade.indicators.sma20}${getSMAIndicator(trade.indicators.price, trade.indicators.sma20, 'SMA20')}</div>
+                        <div>• SMA50: ${trade.indicators.sma50}${getSMAIndicator(trade.indicators.price, trade.indicators.sma50, 'SMA50')}</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               `).join('')}
@@ -290,6 +359,38 @@ window.toggleTrades = function(ticker) {
   }
 };
 
+// Helper functions to interpret indicators
+function getRSIIndicator(rsi) {
+  const rsiVal = parseFloat(rsi);
+  if (isNaN(rsiVal)) return '';
+  if (rsiVal < 30) return ' (Oversold ↑)';
+  if (rsiVal > 70) return ' (Overbought ↓)';
+  if (rsiVal >= 40 && rsiVal <= 60) return ' (Neutral)';
+  return '';
+}
+
+function getMACDIndicator(macd) {
+  if (macd === 'N/A') return '';
+  const macdVal = parseFloat(macd);
+  if (isNaN(macdVal)) return '';
+  if (macdVal > 0) return ' (Bullish ↑)';
+  if (macdVal < 0) return ' (Bearish ↓)';
+  return ' (Neutral)';
+}
+
+function getSMAIndicator(price, sma) {
+  if (sma === 'N/A') return '';
+  const priceVal = parseFloat(price);
+  const smaVal = parseFloat(sma);
+  if (isNaN(priceVal) || isNaN(smaVal)) return '';
+  if (priceVal > smaVal) return ' (Above ↑)';
+  if (priceVal < smaVal) return ' (Below ↓)';
+  return ' (At)';
+}
+
 // Make functions globally available
 window.resetBacktestForm = resetBacktestForm;
 window.closeBacktestModal = closeBacktestModal;
+window.getRSIIndicator = getRSIIndicator;
+window.getMACDIndicator = getMACDIndicator;
+window.getSMAIndicator = getSMAIndicator;

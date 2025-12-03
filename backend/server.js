@@ -675,7 +675,7 @@ app.post('/api/backtest', async (req, res) => {
 });
 
 const PORT = 3001;
-app.listen(PORT, () => {
-  console.log(`\n🚀 Server running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);
   console.log(`📡 Using ${DATA_SOURCE.toUpperCase()} as data source\n`);
 });
