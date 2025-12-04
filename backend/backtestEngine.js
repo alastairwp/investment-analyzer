@@ -273,10 +273,19 @@ async function fetchDailyDataFallback(ticker, apiKey, forceRefresh = false) {
  */
 function calculateIndicators(historicalData, index) {
   const prices = historicalData.slice(0, index + 1).map(d => d.close).reverse();
+  const highs = historicalData.slice(0, index + 1).map(d => d.high).reverse();
+  const lows = historicalData.slice(0, index + 1).map(d => d.low).reverse();
+  const volumes = historicalData.slice(0, index + 1).map(d => d.volume).reverse();
+  const dataPoints = historicalData.slice(0, index + 1).reverse();
   const currentPrice = prices[0];
+  const currentVolume = volumes[0];
+  const currentData = dataPoints[0];
 
   // RSI
   const rsi = calculateRSI(prices);
+
+  // Williams %R (returns -100 to 0; above -20 = overbought, below -80 = oversold)
+  const williamsR = calculateWilliamsR(highs, lows, prices);
 
   // Moving Averages
   const sma20 = calculateSMA(prices, 20);
@@ -301,6 +310,35 @@ function calculateIndicators(historicalData, index) {
   } else if (rsi > 60) {
     // Getting overbought → Moderate SELL signal
     score -= 15;
+  }
+
+  // 1b. Williams %R - Confirms RSI overbought/oversold (range: -100 to 0)
+  // Above -20 = Overbought, Below -80 = Oversold
+  // CRITICAL: Williams %R is a hard gate - strongly overbought BLOCKS buying
+  let williamsRBlock = false;
+  if (williamsR > -20) {
+    // Strongly overbought - price near period high → NEVER BUY
+    score -= 30;
+    williamsRBlock = true; // Flag to enforce hard cap later
+  } else if (williamsR > -30) {
+    // Getting overbought → Strong SELL signal
+    score -= 15;
+  } else if (williamsR < -80) {
+    // Strongly oversold - price near period low → BUY signal
+    score += 20;
+  } else if (williamsR < -70) {
+    // Getting oversold → Moderate BUY signal
+    score += 10;
+  }
+
+  // 1c. RSI + Williams %R Agreement (strong confirmation)
+  // Both overbought = very strong sell signal
+  if (rsi > 65 && williamsR > -25) {
+    score -= 20; // Additional penalty when both indicators agree on overbought
+  }
+  // Both oversold = very strong buy signal
+  if (rsi < 35 && williamsR < -75) {
+    score += 15; // Additional bonus when both indicators agree on oversold
   }
 
   // 2. Moving Averages - REVERSED (buy when below, sell when above)
@@ -379,15 +417,142 @@ function calculateIndicators(historicalData, index) {
     score -= 5;
   }
 
+  // ============================================
+  // 5. FALLING KNIFE PROTECTION FILTERS
+  // Prevent buying into continued downtrends
+  // ============================================
+
+  // 5a. SELLING PRESSURE FILTER
+  // Don't buy on high volume down days - indicates panic selling not exhaustion
+  const avgVolume20 = volumes.length >= 20
+    ? volumes.slice(0, 20).reduce((a, b) => a + b, 0) / 20
+    : currentVolume;
+  const volumeRatio = currentVolume / avgVolume20;
+  const priceDropToday = dataPoints.length >= 2
+    ? ((currentPrice - dataPoints[1].close) / dataPoints[1].close) * 100
+    : 0;
+
+  // High volume (1.5x+ average) combined with price drop = selling pressure, reduce buy signal
+  if (volumeRatio > 1.5 && priceDropToday < -1) {
+    const penaltyFactor = Math.min(volumeRatio - 1, 2); // Cap penalty at 2x
+    score -= Math.round(15 * penaltyFactor); // Significant penalty for high volume selling
+  }
+
+  // 5b. CONSECUTIVE DOWN PERIODS FILTER
+  // Don't buy if we've had 3+ consecutive down periods (catching falling knife)
+  let consecutiveDownPeriods = 0;
+  for (let i = 0; i < Math.min(5, prices.length - 1); i++) {
+    if (prices[i] < prices[i + 1]) {
+      consecutiveDownPeriods++;
+    } else {
+      break; // Stop counting on first up period
+    }
+  }
+
+  if (consecutiveDownPeriods >= 3) {
+    score -= 20; // Strong penalty for buying into sustained downtrend
+  } else if (consecutiveDownPeriods === 2) {
+    score -= 10; // Moderate penalty
+  }
+
+  // 5c. TIME-OF-DAY FILTER (for intraday data)
+  // Avoid buying in the last 2 hours of a heavy down day
+  const datetime = currentData.datetime || '';
+  const timeMatch = datetime.match(/(\d{2}):(\d{2}):\d{2}$/);
+  let isMorningSession = false;
+  if (timeMatch) {
+    const hour = parseInt(timeMatch[1]);
+    const minute = parseInt(timeMatch[2]);
+    const isLateDay = hour >= 14 || (hour === 13 && minute >= 30); // After 2:30 PM
+    isMorningSession = hour < 11; // Before 11 AM
+
+    // If it's late in the day AND we're down significantly today, reduce buy signal
+    if (isLateDay && priceDropToday < -1.5) {
+      score -= 15; // Late-day sells often continue into next morning
+    }
+  }
+
+  // 5d. MORNING REVERSAL / GAP-AND-FADE FILTER
+  // Detect when price spiked at open but is now falling - classic bull trap
+  // Look for: high in first 30 min of day significantly above current price
+  let morningReversalBlock = false;
+  let dropFromTodayHigh = 0;
+
+  if (isMorningSession && dataPoints.length >= 3) {
+    // Find today's high so far (look back up to 6 periods = 1.5 hours of 15-min data)
+    const todayDate = currentData.date;
+    let todayHigh = currentData.high;
+    let periodsToday = 0;
+
+    for (let i = 0; i < Math.min(6, dataPoints.length); i++) {
+      if (dataPoints[i].date === todayDate) {
+        todayHigh = Math.max(todayHigh, dataPoints[i].high);
+        periodsToday++;
+      } else {
+        break;
+      }
+    }
+
+    // If we're in morning session and price has dropped significantly from today's high
+    dropFromTodayHigh = ((todayHigh - currentPrice) / todayHigh) * 100;
+
+    if (dropFromTodayHigh > 0.8) {
+      // Price dropped more than 0.8% from today's high - morning reversal in progress
+      // This is a HARD BLOCK - never buy during active morning reversal
+      morningReversalBlock = true;
+      score -= 30;
+    } else if (dropFromTodayHigh > 0.5) {
+      // Price dropped more than 0.5% from today's high
+      score -= 15;
+    }
+
+    // Extra penalty if it's a gap-up day that's fading (opened higher than yesterday's close)
+    if (dataPoints.length > periodsToday) {
+      const yesterdayClose = dataPoints[periodsToday]?.close;
+      // Gap up: today's high > yesterday close by any meaningful amount
+      // Fading: current price below today's high (any amount counts)
+      if (yesterdayClose && todayHigh > yesterdayClose * 1.005 && currentPrice < todayHigh * 0.995) {
+        // Gapped up but now fading - classic bull trap
+        // This is also a HARD BLOCK
+        morningReversalBlock = true;
+        score -= 20;
+      }
+    }
+  }
+
   score = Math.max(0, Math.min(100, score));
+
+  // HARD CAP: If Williams %R is strongly overbought (> -20), NEVER allow BUY signal
+  // Cap score at 55 maximum (below BUY threshold of 60)
+  if (williamsR > -20) {
+    score = Math.min(score, 55);
+  }
+  // Also cap at 58 if moderately overbought (> -30)
+  else if (williamsR > -30) {
+    score = Math.min(score, 58);
+  }
+
+  // HARD CAP: Morning reversal in progress - NEVER buy
+  // Cap score at 50 maximum (well below BUY threshold)
+  if (morningReversalBlock) {
+    score = Math.min(score, 50);
+  }
 
   return {
     technicalScore: Math.round(score),
     rsi,
+    williamsR,
     sma20,
     sma50,
     macd,
-    currentPrice
+    currentPrice,
+    // Falling knife filter data
+    volumeRatio,
+    priceDropToday,
+    consecutiveDownPeriods,
+    williamsRBlock: williamsR > -20, // Flag indicating hard block was applied
+    morningReversalBlock,
+    dropFromTodayHigh
   };
 }
 
@@ -438,6 +603,29 @@ function calculateEMA(prices, period) {
 }
 
 /**
+ * Calculate Williams %R
+ * Returns value from -100 to 0
+ * Above -20 = Overbought (SELL signal)
+ * Below -80 = Oversold (BUY signal)
+ */
+function calculateWilliamsR(highs, lows, closes, period = 14) {
+  if (highs.length < period || lows.length < period || closes.length < period) {
+    return -50; // Neutral if not enough data
+  }
+
+  const highestHigh = Math.max(...highs.slice(0, period));
+  const lowestLow = Math.min(...lows.slice(0, period));
+  const currentClose = closes[0];
+
+  if (highestHigh === lowestLow) return -50; // Avoid division by zero
+
+  // Williams %R formula: ((Highest High - Close) / (Highest High - Lowest Low)) * -100
+  const williamsR = ((highestHigh - currentClose) / (highestHigh - lowestLow)) * -100;
+
+  return williamsR;
+}
+
+/**
  * Generate recommendation based on master score
  * For backtesting, we use technical score only (sentiment/fundamental not available historically)
  */
@@ -479,6 +667,19 @@ function generateRationale(recommendation, indicators, currentPrice, action, pro
     reasons.push('stock is getting overbought (RSI above 60) - price is elevated and approaching reversal zone');
   }
 
+  // Williams %R reasoning (range: -100 to 0)
+  if (indicators.williamsR !== undefined) {
+    if (indicators.williamsR > -20) {
+      reasons.push(`Williams %R at ${indicators.williamsR.toFixed(0)} (strongly overbought - price near 14-day high)`);
+    } else if (indicators.williamsR > -30) {
+      reasons.push(`Williams %R at ${indicators.williamsR.toFixed(0)} (getting overbought)`);
+    } else if (indicators.williamsR < -80) {
+      reasons.push(`Williams %R at ${indicators.williamsR.toFixed(0)} (strongly oversold - price near 14-day low)`);
+    } else if (indicators.williamsR < -70) {
+      reasons.push(`Williams %R at ${indicators.williamsR.toFixed(0)} (getting oversold)`);
+    }
+  }
+
   // Moving average reasoning - REVERSED (buy when below = cheap, sell when above = expensive)
   if (indicators.sma20 && indicators.sma50) {
     if (currentPrice < indicators.sma20 && currentPrice < indicators.sma50) {
@@ -515,6 +716,18 @@ function generateRationale(recommendation, indicators, currentPrice, action, pro
       reasons.push('strong downtrend + oversold = high-probability reversal setup');
     } else if (indicators.macd > 1 && indicators.rsi > 60) {
       reasons.push('strong uptrend + overbought = momentum exhaustion');
+    }
+  }
+
+  // Falling knife filter reasoning (for HOLD signals that could have been BUY)
+  if (action === 'BUY' || recommendation === 'HOLD') {
+    if (indicators.volumeRatio > 1.5 && indicators.priceDropToday < -1) {
+      reasons.push(`high selling pressure detected (${indicators.volumeRatio.toFixed(1)}x avg volume on ${Math.abs(indicators.priceDropToday).toFixed(1)}% drop)`);
+    }
+    if (indicators.consecutiveDownPeriods >= 3) {
+      reasons.push(`${indicators.consecutiveDownPeriods} consecutive down periods (falling knife risk)`);
+    } else if (indicators.consecutiveDownPeriods === 2) {
+      reasons.push('2 consecutive down periods (caution advised)');
     }
   }
 
@@ -609,23 +822,51 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
   const buyAndHoldShares = initialInvestment / startPrice;
   const buyAndHoldValue = buyAndHoldShares * endPrice;
 
+  // Enhanced exit tracking variables
+  let highestPriceSinceEntry = 0;  // For trailing stop-loss
+  let currentDayHigh = 0;          // For intraday reversal detection
+  let currentDay = null;           // Track day changes
+
   // Simulate intraday checks (every 15 minutes)
   for (let i = 0; i < tradingData.length; i++) {
     const currentDatetime = tradingData[i].datetime;
     const currentDate = tradingData[i].date;
     const currentPrice = tradingData[i].close;
+    const currentHigh = tradingData[i].high;
+    const currentVolume = tradingData[i].volume;
+
+    // Reset intraday high on new day
+    if (currentDate !== currentDay) {
+      currentDay = currentDate;
+      currentDayHigh = currentHigh;
+    } else {
+      currentDayHigh = Math.max(currentDayHigh, currentHigh);
+    }
+
+    // Update highest price since entry (for trailing stop)
+    if (shares > 0) {
+      highestPriceSinceEntry = Math.max(highestPriceSinceEntry, currentHigh);
+    }
 
     // Find index in full historical data (need lookback for indicators)
     const fullDataIndex = fullHistoricalData.findIndex(d => d.datetime === currentDatetime);
 
     if (fullDataIndex === -1 || fullDataIndex < 50) continue; // Need enough history for indicators
 
-    // Calculate indicators
+    // Calculate indicators (now includes volume analysis)
     const indicators = calculateIndicators(fullHistoricalData, fullDataIndex);
     const recommendation = generateRecommendation(indicators.technicalScore);
 
     // Calculate profit/loss if we have shares
     const profitPercent = shares > 0 ? ((currentPrice - averageBuyPrice) / averageBuyPrice) * 100 : 0;
+
+    // Calculate volume metrics for enhanced exit signals
+    const recentVolumes = fullHistoricalData.slice(Math.max(0, fullDataIndex - 20), fullDataIndex + 1).map(d => d.volume);
+    const avgVolume = recentVolumes.length > 0 ? recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length : currentVolume;
+
+    // Get recent price high for volume divergence check
+    const recentData = fullHistoricalData.slice(Math.max(0, fullDataIndex - 10), fullDataIndex + 1);
+    const recentHigh = Math.max(...recentData.map(d => d.high));
 
     // Execute trades based on recommendation
     if ((recommendation === 'STRONG BUY' || recommendation === 'BUY') && cash > 0) {
@@ -642,6 +883,9 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
         averageBuyPrice = totalCost / shares;
         cash -= cost;
 
+        // Reset trailing stop tracker on new/additional purchase
+        highestPriceSinceEntry = currentPrice;
+
         const rationale = generateRationale(recommendation, indicators, currentPrice, 'BUY', 0);
 
         trades.push({
@@ -657,6 +901,7 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
           rationale,
           indicators: {
             rsi: indicators.rsi.toFixed(2),
+            williamsR: indicators.williamsR?.toFixed(2) || 'N/A',
             sma20: indicators.sma20?.toFixed(2) || 'N/A',
             sma50: indicators.sma50?.toFixed(2) || 'N/A',
             macd: indicators.macd?.toFixed(2) || 'N/A',
@@ -664,59 +909,136 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
           }
         });
       }
-    } else if ((recommendation === 'STRONG SELL' || recommendation === 'SELL') && shares > 0) {
-      // PROFIT-AWARE SELLING LOGIC
-      // Only sell if:
-      // 1. We're in profit (at least 3% gain) OR
-      // 2. Stop loss triggered (more than 8% loss) OR
-      // 3. Very strong sell signal (STRONG SELL + very overbought)
+    } else if (shares > 0) {
+      // ENHANCED PROFIT-AWARE SELLING LOGIC with 6 exit strategies
+      let shouldSell = false;
+      let exitReason = '';
 
-      const shouldSell =
-        profitPercent >= 3 || // Take profit
-        profitPercent <= -8 || // Stop loss
-        (recommendation === 'STRONG SELL' && indicators.rsi > 75); // Emergency exit
+      // Only check enhanced exits when we have a SELL/STRONG SELL recommendation OR profit conditions met
+      const hasSellSignal = recommendation === 'STRONG SELL' || recommendation === 'SELL';
 
-      if (shouldSell) {
-      const percentage = buyPercentages[recommendation] || 100;
-      const sharesToSell = Math.floor(shares * percentage / 100);
+      // 1. TAKE PROFIT (lowered from 3% to 2%) - requires sell signal to confirm
+      if (profitPercent >= 2 && hasSellSignal) {
+        shouldSell = true;
+        exitReason = 'take-profit (2%+ gain)';
+      }
 
-      if (sharesToSell > 0) {
-        const proceeds = sharesToSell * currentPrice;
-        const sellProfit = (currentPrice - averageBuyPrice) * sharesToSell;
-        const sellProfitPercent = ((currentPrice - averageBuyPrice) / averageBuyPrice) * 100;
+      // 2. STOP LOSS (unchanged at -8%) - triggers regardless of signal
+      if (profitPercent <= -8) {
+        shouldSell = true;
+        exitReason = 'stop-loss (-8% loss)';
+      }
 
-        shares -= sharesToSell;
-        cash += proceeds;
+      // 2b. TAKE PROFIT at higher threshold (5%+) - can trigger without sell signal
+      if (profitPercent >= 5) {
+        shouldSell = true;
+        exitReason = 'take-profit (5%+ gain)';
+      }
 
-        // Update average buy price if we still have shares
-        if (shares === 0) {
-          averageBuyPrice = 0;
+      // 3. TRAILING STOP-LOSS (activates at 1.5% profit, trails 1% below highest)
+      if (profitPercent > 1.5 && highestPriceSinceEntry > 0) {
+        const trailingStop = highestPriceSinceEntry * 0.99; // 1% below highest
+        if (currentPrice < trailingStop) {
+          shouldSell = true;
+          exitReason = `trailing stop (price fell below ${trailingStop.toFixed(2)})`;
         }
-
-        const rationale = generateRationale(recommendation, indicators, currentPrice, 'SELL', sellProfitPercent);
-
-        trades.push({
-          date: currentDate,
-          datetime: currentDatetime,
-          action: 'SELL',
-          recommendation,
-          shares: sharesToSell,
-          price: currentPrice,
-          proceeds,
-          profit: sellProfit,
-          profitPercent: sellProfitPercent,
-          technicalScore: indicators.technicalScore,
-          portfolioValue: cash + (shares * currentPrice),
-          rationale,
-          indicators: {
-            rsi: indicators.rsi.toFixed(2),
-            sma20: indicators.sma20?.toFixed(2) || 'N/A',
-            sma50: indicators.sma50?.toFixed(2) || 'N/A',
-            macd: indicators.macd?.toFixed(2) || 'N/A',
-            price: currentPrice.toFixed(2)
-          }
-        });
       }
+
+      // 4. RSI-BASED PROFIT TAKING
+      // Only trigger if Williams %R also confirms overbought (not oversold)
+      const williamsRConfirmsOverbought = indicators.williamsR > -50; // Not in oversold territory
+      if (indicators.rsi > 70 && profitPercent > 0 && williamsRConfirmsOverbought) {
+        shouldSell = true;
+        exitReason = `RSI overbought (${indicators.rsi.toFixed(1)}) + in profit`;
+      } else if (indicators.rsi > 65 && profitPercent > 1 && williamsRConfirmsOverbought) {
+        shouldSell = true;
+        exitReason = `RSI elevated (${indicators.rsi.toFixed(1)}) + 1%+ profit`;
+      }
+
+      // 5. VOLUME DIVERGENCE (declining volume at price highs)
+      const volumeDecreasing = currentVolume < avgVolume * 0.7;
+      const priceNearHigh = currentPrice > recentHigh * 0.995;
+      if (volumeDecreasing && priceNearHigh && profitPercent > 1 && hasSellSignal) {
+        shouldSell = true;
+        exitReason = 'volume divergence (low volume at highs)';
+      }
+
+      // 6. INTRADAY REVERSAL (1% drop from day's high)
+      const dropFromDayHigh = currentDayHigh > 0 ? ((currentDayHigh - currentPrice) / currentDayHigh) * 100 : 0;
+      if (dropFromDayHigh > 1 && profitPercent > 0 && hasSellSignal) {
+        shouldSell = true;
+        exitReason = `intraday reversal (${dropFromDayHigh.toFixed(1)}% drop from day high)`;
+      }
+
+      // 7. VOLUME SPIKE DETECTION (distribution signal)
+      const volumeSpike = currentVolume > avgVolume * 2;
+      const nearRecentHigh = currentPrice > recentHigh * 0.98;
+      if (volumeSpike && nearRecentHigh && profitPercent > 0.5 && hasSellSignal) {
+        shouldSell = true;
+        exitReason = 'distribution volume spike at highs';
+      }
+
+      // 8. EMERGENCY EXIT - only when multiple indicators confirm overbought
+      // Require: STRONG SELL + RSI > 75 + Williams %R confirms (not oversold)
+      // Do NOT trigger if: Williams %R is oversold OR price is undervalued (below MAs)
+      const priceUndervalued = indicators.sma50 && currentPrice < indicators.sma50;
+      const williamsROversold = indicators.williamsR < -70;
+
+      if (recommendation === 'STRONG SELL' && indicators.rsi > 75 &&
+          !williamsROversold && !priceUndervalued) {
+        shouldSell = true;
+        exitReason = 'emergency exit (STRONG SELL + RSI > 75 + confirmed)';
+      }
+
+      // Determine if this is an unconditional exit (stop-loss or high take-profit)
+      const isUnconditionalExit = exitReason.includes('stop-loss') || exitReason.includes('5%+ gain');
+
+      if (shouldSell && (hasSellSignal || isUnconditionalExit)) {
+        // For unconditional exits, sell 100%; for signal-based exits, use configured percentage
+        const percentage = isUnconditionalExit ? 100 : (buyPercentages[recommendation] || 100);
+        const sharesToSell = Math.floor(shares * percentage / 100);
+
+        if (sharesToSell > 0) {
+          const proceeds = sharesToSell * currentPrice;
+          const sellProfit = (currentPrice - averageBuyPrice) * sharesToSell;
+          const sellProfitPercent = ((currentPrice - averageBuyPrice) / averageBuyPrice) * 100;
+
+          shares -= sharesToSell;
+          cash += proceeds;
+
+          // Reset tracking variables if position fully closed
+          if (shares === 0) {
+            averageBuyPrice = 0;
+            highestPriceSinceEntry = 0;
+          }
+
+          // Generate rationale with exit reason
+          const baseRationale = generateRationale(recommendation, indicators, currentPrice, 'SELL', sellProfitPercent);
+          const rationale = `Exit: ${exitReason}. ${baseRationale}`;
+
+          trades.push({
+            date: currentDate,
+            datetime: currentDatetime,
+            action: 'SELL',
+            recommendation,
+            exitReason, // New field to track which exit strategy triggered
+            shares: sharesToSell,
+            price: currentPrice,
+            proceeds,
+            profit: sellProfit,
+            profitPercent: sellProfitPercent,
+            technicalScore: indicators.technicalScore,
+            portfolioValue: cash + (shares * currentPrice),
+            rationale,
+            indicators: {
+              rsi: indicators.rsi.toFixed(2),
+              sma20: indicators.sma20?.toFixed(2) || 'N/A',
+              sma50: indicators.sma50?.toFixed(2) || 'N/A',
+              macd: indicators.macd?.toFixed(2) || 'N/A',
+              price: currentPrice.toFixed(2)
+            }
+          });
+        }
       }
     }
   }
