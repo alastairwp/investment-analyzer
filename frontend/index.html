@@ -11,6 +11,66 @@
     }
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
+  <style>
+    /* Tooltip styles */
+    .info-tooltip {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      cursor: help;
+    }
+    .info-tooltip .tooltip-icon {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #6b7280;
+      color: white;
+      font-size: 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 4px;
+      flex-shrink: 0;
+    }
+    .info-tooltip .tooltip-text {
+      visibility: hidden;
+      position: absolute;
+      z-index: 100;
+      bottom: 125%;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: #1f2937;
+      color: #f3f4f6;
+      text-align: left;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      line-height: 1.4;
+      width: 220px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .info-tooltip .tooltip-text::after {
+      content: "";
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      margin-left: -5px;
+      border-width: 5px;
+      border-style: solid;
+      border-color: #1f2937 transparent transparent transparent;
+    }
+    .info-tooltip:hover .tooltip-text {
+      visibility: visible;
+      opacity: 1;
+    }
+    .tooltip-text strong {
+      color: #fbbf24;
+    }
+  </style>
 </head>
 <body class="bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
   <div class="flex min-h-screen">
@@ -287,100 +347,524 @@
       <div id="backtestContent" class="p-6">
         <!-- Configuration Form -->
         <div id="backtestConfigForm">
-          <div class="grid grid-cols-2 gap-6 mb-6">
-            <!-- Left Column -->
-            <div class="space-y-4">
-              <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Stock Tickers (comma separated)
+          <!-- Data Source Section -->
+          <div class="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button type="button" onclick="toggleConfigSection('dataSourceSection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+              <span class="font-semibold text-gray-800 dark:text-gray-100">Data Source</span>
+              <span id="dataSourceSection-arrow" class="text-gray-500">▼</span>
+            </button>
+            <div id="dataSourceSection" class="p-4 space-y-4">
+              <div class="space-y-2">
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
+                  <input type="radio" name="dataSourceType" value="api" checked class="text-orange-600">
+                  <span>Use API (Alpha Vantage) - Live data</span>
                 </label>
-                <input
-                  type="text"
-                  id="backtestTickers"
-                  placeholder="e.g., AAPL, MSFT, GOOGL"
-                  class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                  value="AAPL, MSFT, GOOGL"
-                />
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">US stocks only with free tier. UK stocks (.L) require premium API.</p>
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
+                  <input type="radio" name="dataSourceType" value="default" class="text-orange-600">
+                  <span>Use Default Dataset (AAPL 2019 1-min data)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
+                  <input type="radio" name="dataSourceType" value="upload" class="text-orange-600">
+                  <span>Upload Custom CSV</span>
+                </label>
               </div>
 
-              <div>
-                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Initial Investment per Stock (£)
-                </label>
-                <input
-                  type="number"
-                  id="backtestInvestment"
-                  class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                  value="1000"
-                  min="1"
-                />
+              <div id="uploadCsvSection" class="hidden mt-4 p-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                <input type="file" id="csvFileInput" accept=".csv,.txt" class="w-full text-sm text-gray-600 dark:text-gray-300 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100" />
+                <p id="uploadedFileInfo" class="text-xs text-gray-500 dark:text-gray-400 mt-2 hidden"></p>
               </div>
 
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    id="backtestStartDate"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                    value="2025-11-03"
-                  />
-                </div>
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    End Date
-                  </label>
-                  <input
-                    type="date"
-                    id="backtestEndDate"
-                    class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                    value="2025-12-02"
-                  />
-                </div>
+              <div id="resampleSection" class="hidden mt-4">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Resample Interval (minutes)
+                </label>
+                <select id="resampleMinutes" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg">
+                  <option value="1">1 minute (no resampling)</option>
+                  <option value="5">5 minutes</option>
+                  <option value="15">15 minutes</option>
+                  <option value="30" selected>30 minutes</option>
+                  <option value="60">1 hour</option>
+                </select>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Resample 1-minute data to larger candles for faster processing</p>
               </div>
             </div>
+          </div>
 
-            <!-- Right Column - Trade Percentages -->
-            <div class="space-y-4">
-              <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Position Sizing (%)</h3>
-                <div class="space-y-3">
+          <!-- Basic Settings Section -->
+          <div class="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button type="button" onclick="toggleConfigSection('basicSettingsSection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+              <span class="font-semibold text-gray-800 dark:text-gray-100">Basic Settings</span>
+              <span id="basicSettingsSection-arrow" class="text-gray-500">▼</span>
+            </button>
+            <div id="basicSettingsSection" class="p-4">
+              <div class="grid grid-cols-2 gap-6">
+                <div class="space-y-4">
                   <div>
-                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">STRONG BUY</label>
-                    <input type="number" id="percentStrongBuy" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="100" min="0" max="100" />
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Stock Tickers (comma separated)
+                    </label>
+                    <input
+                      type="text"
+                      id="backtestTickers"
+                      placeholder="e.g., AAPL, MSFT, GOOGL"
+                      class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      value="AAPL"
+                    />
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">For file data source, only the first ticker is used.</p>
                   </div>
+
                   <div>
-                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">BUY</label>
-                    <input type="number" id="percentBuy" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="100" min="0" max="100" />
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Initial Investment ($)
+                    </label>
+                    <input
+                      type="number"
+                      id="backtestInvestment"
+                      class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                      value="1000"
+                      min="1"
+                    />
                   </div>
-                  <div>
-                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">SELL</label>
-                    <input type="number" id="percentSell" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="100" min="0" max="100" />
+
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Start Date
+                      </label>
+                      <input
+                        type="date"
+                        id="backtestStartDate"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        value="2019-01-02"
+                      />
+                    </div>
+                    <div>
+                      <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        End Date
+                      </label>
+                      <input
+                        type="date"
+                        id="backtestEndDate"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                        value="2019-12-31"
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">STRONG SELL</label>
-                    <input type="number" id="percentStrongSell" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="100" min="0" max="100" />
+                </div>
+
+                <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
+                  <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Position Sizing (%)</h3>
+                  <div class="grid grid-cols-2 gap-3">
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">STRONG BUY</label>
+                      <input type="number" id="percentStrongBuy" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="100" min="0" max="100" />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">BUY</label>
+                      <input type="number" id="percentBuy" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="100" min="0" max="100" />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">SELL</label>
+                      <input type="number" id="percentSell" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="100" min="0" max="100" />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">STRONG SELL</label>
+                      <input type="number" id="percentStrongSell" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="100" min="0" max="100" />
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Cache Control -->
-          <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
-            <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
-              <input type="checkbox" id="forceRefreshCache" class="rounded">
-              <span>🔄 Refresh cache (fetch fresh data from Alpha Vantage)</span>
-            </label>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-              Leave unchecked to use cached data. Check this to fetch the latest data from the API.
-            </p>
+          <!-- Indicator Periods Section -->
+          <div class="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button type="button" onclick="toggleConfigSection('indicatorPeriodsSection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+              <span class="font-semibold text-gray-800 dark:text-gray-100">Indicator Periods</span>
+              <span id="indicatorPeriodsSection-arrow" class="text-gray-500">▶</span>
+            </button>
+            <div id="indicatorPeriodsSection" class="hidden p-4">
+              <div class="grid grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">RSI Period<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Relative Strength Index period.</strong> Number of candles to calculate RSI. Lower values (7-10) are more sensitive, higher values (20-30) are smoother. <strong>Range:</strong> 2-50, <strong>Default:</strong> 14</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgRsiPeriod" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="14" min="2" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Williams %R Period<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Williams %R lookback period.</strong> Number of candles for momentum oscillator. Measures overbought/oversold conditions. <strong>Range:</strong> 2-50, <strong>Default:</strong> 14</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgWilliamsRPeriod" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="14" min="2" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Momentum Period<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Price momentum lookback.</strong> Compares current price to price N periods ago. Used to detect trend strength. <strong>Range:</strong> 1-20, <strong>Default:</strong> 5</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgMomentumPeriod" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="5" min="1" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">SMA Short Period<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Short-term moving average.</strong> Faster MA that reacts quickly to price changes. Used for crossover signals. <strong>Range:</strong> 5-50, <strong>Default:</strong> 20</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgSmaShortPeriod" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="20" min="2" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">SMA Long Period<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Long-term moving average.</strong> Slower MA for identifying overall trend direction. Price above = bullish, below = bearish. <strong>Range:</strong> 20-200, <strong>Default:</strong> 50</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgSmaLongPeriod" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="50" min="2" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">MACD Fast<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>MACD fast EMA period.</strong> The faster exponential moving average in MACD calculation. <strong>Range:</strong> 5-20, <strong>Default:</strong> 12</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgMacdFast" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="12" min="1" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">MACD Slow<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>MACD slow EMA period.</strong> The slower exponential moving average in MACD calculation. <strong>Range:</strong> 20-50, <strong>Default:</strong> 26</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgMacdSlow" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="26" min="1" />
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div class="flex justify-end gap-3">
+          <!-- Signal Thresholds Section -->
+          <div class="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button type="button" onclick="toggleConfigSection('signalThresholdsSection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+              <span class="font-semibold text-gray-800 dark:text-gray-100">Signal Thresholds</span>
+              <span id="signalThresholdsSection-arrow" class="text-gray-500">▶</span>
+            </button>
+            <div id="signalThresholdsSection" class="hidden p-4 space-y-4">
+              <div>
+                <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase">RSI Thresholds</h4>
+                <div class="grid grid-cols-4 gap-4">
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Oversold<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>RSI oversold level.</strong> Below this = strong buy signal. Stock is heavily sold, potential reversal up. <strong>Range:</strong> 0-40, <strong>Default:</strong> 30</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgRsiOversold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="30" min="0" max="100" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Mod. Oversold<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Moderately oversold.</strong> Weaker buy signal than full oversold. Adds smaller score boost. <strong>Range:</strong> 30-50, <strong>Default:</strong> 40</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgRsiModerateOversold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="40" min="0" max="100" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Mod. Overbought<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Moderately overbought.</strong> Weaker sell signal. Subtracts smaller score penalty. <strong>Range:</strong> 55-70, <strong>Default:</strong> 60</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgRsiModerateOverbought" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="60" min="0" max="100" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Overbought<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>RSI overbought level.</strong> Above this = strong sell signal. Stock is overextended, potential reversal down. <strong>Range:</strong> 65-90, <strong>Default:</strong> 70</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgRsiOverbought" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="70" min="0" max="100" />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase">Williams %R Thresholds (range: -100 to 0)</h4>
+                <div class="grid grid-cols-4 gap-4">
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Oversold<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Williams %R oversold.</strong> Below this (more negative) = buy signal. Near -100 means price at period low. <strong>Range:</strong> -100 to -60, <strong>Default:</strong> -80</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgWilliamsROversold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="-80" min="-100" max="0" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Mod. Oversold<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Moderately oversold level.</strong> Weaker buy signal zone. <strong>Range:</strong> -80 to -50, <strong>Default:</strong> -70</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgWilliamsRModerateOversold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="-70" min="-100" max="0" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Mod. Overbought<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Moderately overbought.</strong> Weaker sell signal zone. <strong>Range:</strong> -50 to -20, <strong>Default:</strong> -30</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgWilliamsRModerateOverbought" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="-30" min="-100" max="0" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Overbought<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Williams %R overbought.</strong> Above this (closer to 0) = sell signal. Near 0 means price at period high. <strong>Range:</strong> -30 to 0, <strong>Default:</strong> -20</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgWilliamsROverbought" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="-20" min="-100" max="0" />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase">Score Thresholds for Recommendations</h4>
+                <div class="grid grid-cols-4 gap-4">
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Strong Buy<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Score for STRONG BUY signal.</strong> Technical score >= this triggers strong buy. Higher = more selective. <strong>Range:</strong> 65-90, <strong>Default:</strong> 75</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgStrongBuyThreshold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="75" min="0" max="100" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Buy<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Score for BUY signal.</strong> Score >= this but < Strong Buy triggers regular buy. <strong>Range:</strong> 55-70, <strong>Default:</strong> 60</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgBuyThreshold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="60" min="0" max="100" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Sell<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Score for SELL signal.</strong> Score <= this but > Strong Sell triggers regular sell. <strong>Range:</strong> 35-50, <strong>Default:</strong> 45</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgSellThreshold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="45" min="0" max="100" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Strong Sell<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Score for STRONG SELL.</strong> Score <= this triggers strong sell. Lower = more selective. <strong>Range:</strong> 20-40, <strong>Default:</strong> 30</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgStrongSellThreshold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="30" min="0" max="100" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Exit Strategy Section -->
+          <div class="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button type="button" onclick="toggleConfigSection('exitStrategySection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+              <span class="font-semibold text-gray-800 dark:text-gray-100">Exit Strategy</span>
+              <span id="exitStrategySection-arrow" class="text-gray-500">▶</span>
+            </button>
+            <div id="exitStrategySection" class="hidden p-4">
+              <div class="grid grid-cols-4 gap-4">
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Take Profit %<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Automatic profit target.</strong> Sell when position gains this %. Locks in profits. Set to 0 to disable. <strong>Range:</strong> 0-50, <strong>Default:</strong> 5</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgTakeProfitPercent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="5" min="0" step="0.5" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Stop Loss %<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Maximum loss limit.</strong> Sell when position drops this % (negative value). Limits downside. <strong>Range:</strong> -50 to 0, <strong>Default:</strong> -8</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgStopLossPercent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="-8" max="0" step="0.5" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Trailing Stop Activation %<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>When to activate trailing stop.</strong> Trailing stop kicks in after position gains this %. Protects profits. <strong>Range:</strong> 0-20, <strong>Default:</strong> 1.5</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgTrailingStopActivation" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="1.5" min="0" step="0.1" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Trailing Stop Distance %<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Distance from peak price.</strong> Once activated, sell if price drops this % from highest point. <strong>Range:</strong> 0.5-10, <strong>Default:</strong> 1</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgTrailingStopPercent" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="1" min="0" step="0.1" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Volume & Momentum Filters Section -->
+          <div class="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button type="button" onclick="toggleConfigSection('volumeMomentumSection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+              <span class="font-semibold text-gray-800 dark:text-gray-100">Volume & Momentum Filters</span>
+              <span id="volumeMomentumSection-arrow" class="text-gray-500">▶</span>
+            </button>
+            <div id="volumeMomentumSection" class="hidden p-4">
+              <div class="grid grid-cols-2 gap-6">
+                <div class="space-y-4">
+                  <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Volume Filters</h4>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                        <span class="info-tooltip">High Volume Ratio<span class="tooltip-icon">i</span>
+                          <span class="tooltip-text"><strong>Above-average volume threshold.</strong> Volume >= avgVolume * this ratio = high volume signal. Confirms price moves. <strong>Range:</strong> 1.2-3.0, <strong>Default:</strong> 1.5</span>
+                        </span>
+                      </label>
+                      <input type="number" id="cfgHighVolumeRatio" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="1.5" min="0" step="0.1" />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                        <span class="info-tooltip">Low Volume Ratio<span class="tooltip-icon">i</span>
+                          <span class="tooltip-text"><strong>Below-average volume threshold.</strong> Volume <= avgVolume * this ratio = low volume. Low conviction moves. <strong>Range:</strong> 0.3-0.9, <strong>Default:</strong> 0.7</span>
+                        </span>
+                      </label>
+                      <input type="number" id="cfgLowVolumeRatio" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="0.7" min="0" step="0.1" />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                        <span class="info-tooltip">Volume Spike Ratio<span class="tooltip-icon">i</span>
+                          <span class="tooltip-text"><strong>Extreme volume detection.</strong> Volume >= avgVolume * this = volume spike. Often signals major events or reversals. <strong>Range:</strong> 1.5-5.0, <strong>Default:</strong> 2.0</span>
+                        </span>
+                      </label>
+                      <input type="number" id="cfgVolumeSpikeRatio" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="2.0" min="0" step="0.1" />
+                    </div>
+                  </div>
+                </div>
+                <div class="space-y-4">
+                  <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Momentum Filters</h4>
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                        <span class="info-tooltip">Big Move Threshold %<span class="tooltip-icon">i</span>
+                          <span class="tooltip-text"><strong>Large price move detection.</strong> Price change >= this % from open = significant move. Affects signal strength. <strong>Range:</strong> 2-10, <strong>Default:</strong> 3</span>
+                        </span>
+                      </label>
+                      <input type="number" id="cfgBigMoveThreshold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="3" min="0" step="0.5" />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                        <span class="info-tooltip">Small Move Threshold %<span class="tooltip-icon">i</span>
+                          <span class="tooltip-text"><strong>Moderate price move detection.</strong> Price change >= this % = notable move. Less impactful than big move. <strong>Range:</strong> 1-5, <strong>Default:</strong> 2</span>
+                        </span>
+                      </label>
+                      <input type="number" id="cfgSmallMoveThreshold" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="2" min="0" step="0.5" />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                        <span class="info-tooltip">Consec. Down (Strong)<span class="tooltip-icon">i</span>
+                          <span class="tooltip-text"><strong>Strong oversold detection.</strong> This many consecutive down candles = strong buy signal (potential bounce). <strong>Range:</strong> 2-5, <strong>Default:</strong> 3</span>
+                        </span>
+                      </label>
+                      <input type="number" id="cfgConsecutiveDownStrong" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="3" min="1" />
+                    </div>
+                    <div>
+                      <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                        <span class="info-tooltip">Consec. Down (Mod.)<span class="tooltip-icon">i</span>
+                          <span class="tooltip-text"><strong>Moderate oversold detection.</strong> This many consecutive down candles = moderate buy signal. <strong>Range:</strong> 1-4, <strong>Default:</strong> 2</span>
+                        </span>
+                      </label>
+                      <input type="number" id="cfgConsecutiveDownModerate" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="2" min="1" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Time-of-Day Filters Section -->
+          <div class="mb-4 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+            <button type="button" onclick="toggleConfigSection('timeFiltersSection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+              <span class="font-semibold text-gray-800 dark:text-gray-100">Time-of-Day Filters</span>
+              <span id="timeFiltersSection-arrow" class="text-gray-500">▶</span>
+            </button>
+            <div id="timeFiltersSection" class="hidden p-4">
+              <div class="grid grid-cols-3 gap-4">
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Late Session Hour<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Late day trading start.</strong> Hour when late session begins (24h format). Late session often has lower volume, different patterns. <strong>Range:</strong> 12-16, <strong>Default:</strong> 14</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgLateSessionHour" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="14" min="0" max="23" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Late Session Minute<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Late session start minute.</strong> Combined with hour to define exact late session start time. <strong>Range:</strong> 0-59, <strong>Default:</strong> 30</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgLateSessionMinute" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="30" min="0" max="59" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                    <span class="info-tooltip">Morning Session End<span class="tooltip-icon">i</span>
+                      <span class="tooltip-text"><strong>Morning session end hour.</strong> Morning often has highest volume and best moves. Used for morning reversal detection. <strong>Range:</strong> 10-12, <strong>Default:</strong> 11</span>
+                    </span>
+                  </label>
+                  <input type="number" id="cfgMorningSessionEndHour" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="11" min="0" max="23" />
+                </div>
+              </div>
+              <div class="mt-4">
+                <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2 uppercase">Morning Reversal Thresholds</h4>
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Strong Reversal %<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Strong morning reversal.</strong> If price recovers this % from morning low, it's a strong buy signal. Morning reversals often predict day direction. <strong>Range:</strong> 0.5-2.0, <strong>Default:</strong> 0.8</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgMorningReversalStrong" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="0.8" min="0" step="0.1" />
+                  </div>
+                  <div>
+                    <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                      <span class="info-tooltip">Moderate Reversal %<span class="tooltip-icon">i</span>
+                        <span class="tooltip-text"><strong>Moderate morning reversal.</strong> Smaller recovery threshold for moderate buy signal. <strong>Range:</strong> 0.3-1.0, <strong>Default:</strong> 0.5</span>
+                      </span>
+                    </label>
+                    <input type="number" id="cfgMorningReversalModerate" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" value="0.5" min="0" step="0.1" />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cache Control & Actions -->
+          <div class="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+            <div class="flex items-center justify-between mb-4">
+              <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
+                <input type="checkbox" id="forceRefreshCache" class="rounded">
+                <span>Refresh cache (fetch fresh data from API)</span>
+              </label>
+              <button
+                type="button"
+                id="resetConfigBtn"
+                class="px-4 py-1 text-sm border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                Reset to Defaults
+              </button>
+            </div>
+          </div>
+
+          <div class="flex justify-end gap-3 mt-4">
             <button
               id="cancelBacktestBtn"
               class="px-6 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
@@ -391,7 +875,6 @@
               id="runBacktestBtn"
               class="px-6 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
             >
-              <span>🚀</span>
               <span>Run Backtest</span>
             </button>
           </div>

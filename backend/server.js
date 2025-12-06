@@ -2,6 +2,8 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const path = require('path');
+const fs = require('fs');
 const NodeCache = require('node-cache');
 const { analyzeSentiment } = require('./sentiment');
 const finnhub = require('./finnhubAdapter');
@@ -628,10 +630,112 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// ========== BACKTEST ENDPOINT ==========
+// ========== BACKTEST ENDPOINTS ==========
 
-const { runBacktest } = require('./backtestEngine');
+const { runBacktest, DEFAULT_INDICATOR_CONFIG } = require('./backtestEngine');
+const multer = require('multer');
+const uploadsDir = path.join(__dirname, 'uploads');
 
+// Ensure uploads directory exists
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for CSV uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, uploadsDir),
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + '-' + file.originalname);
+  }
+});
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv') || file.originalname.endsWith('.txt')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are allowed'));
+    }
+  },
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB limit
+});
+
+// Get default indicator config
+app.get('/api/backtest/config', (req, res) => {
+  res.json(DEFAULT_INDICATOR_CONFIG);
+});
+
+// List available CSV datasets
+app.get('/api/backtest/datasets', (req, res) => {
+  try {
+    const datasets = [];
+
+    // Add default dataset
+    const defaultDataset = path.join(__dirname, 'dataset_appl_2019.txt');
+    if (fs.existsSync(defaultDataset)) {
+      datasets.push({
+        name: 'AAPL 2019 (1-minute)',
+        file: 'dataset_appl_2019.txt',
+        path: defaultDataset,
+        isDefault: true
+      });
+    }
+
+    // Add uploaded datasets
+    if (fs.existsSync(uploadsDir)) {
+      const files = fs.readdirSync(uploadsDir);
+      files.forEach(file => {
+        if (file.endsWith('.csv') || file.endsWith('.txt')) {
+          datasets.push({
+            name: file,
+            file: file,
+            path: path.join(uploadsDir, file),
+            isDefault: false
+          });
+        }
+      });
+    }
+
+    res.json({ datasets });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Upload CSV dataset
+app.post('/api/backtest/upload-csv', upload.single('file'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // Read file to count rows and get date range
+    const content = fs.readFileSync(req.file.path, 'utf8');
+    const lines = content.trim().split('\n');
+    const hasHeader = lines[0].toLowerCase().includes('timestamp') || lines[0].toLowerCase().includes('open');
+    const dataLines = hasHeader ? lines.slice(1) : lines;
+
+    // Get date range from first and last lines
+    const firstLine = dataLines[0].split(',');
+    const lastLine = dataLines[dataLines.length - 1].split(',');
+    const startDate = firstLine[0].split(' ')[0];
+    const endDate = lastLine[0].split(' ')[0];
+
+    res.json({
+      success: true,
+      filename: req.file.filename,
+      originalName: req.file.originalname,
+      path: req.file.path,
+      rowCount: dataLines.length,
+      dateRange: { start: startDate, end: endDate }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Main backtest endpoint
 app.post('/api/backtest', async (req, res) => {
   try {
     const config = req.body;
@@ -658,9 +762,27 @@ app.post('/api/backtest', async (req, res) => {
       'STRONG SELL': 100
     };
 
+    // Handle dataSource - resolve file paths
+    if (config.dataSource && config.dataSource.type === 'file') {
+      // If just filename provided, resolve to full path
+      if (config.dataSource.file && !config.dataSource.path) {
+        if (config.dataSource.file === 'dataset_appl_2019.txt') {
+          config.dataSource.path = path.join(__dirname, config.dataSource.file);
+        } else {
+          config.dataSource.path = path.join(uploadsDir, config.dataSource.file);
+        }
+      }
+    }
+
     console.log('\n🎯 Backtest request received');
     console.log('Tickers:', config.tickers.join(', '));
     console.log('Date range:', config.startDate, 'to', config.endDate);
+    if (config.dataSource) {
+      console.log('Data source:', config.dataSource.type, config.dataSource.path || '');
+    }
+    if (config.indicatorConfig) {
+      console.log('Custom indicator config provided');
+    }
 
     // Run backtest
     const results = await runBacktest(config);

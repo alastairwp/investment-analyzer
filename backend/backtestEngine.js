@@ -7,6 +7,194 @@ const path = require('path');
 // Cache directory for historical data
 const CACHE_DIR = path.join(__dirname, '.cache');
 
+// Default indicator configuration - all parameters can be overridden via config
+const DEFAULT_INDICATOR_CONFIG = {
+  // Indicator Periods
+  rsiPeriod: 14,
+  smaShortPeriod: 20,
+  smaLongPeriod: 50,
+  macdFast: 12,
+  macdSlow: 26,
+  williamsRPeriod: 14,
+  momentumPeriod: 5,
+
+  // RSI Thresholds
+  rsiOversold: 30,
+  rsiOverbought: 70,
+  rsiModerateOversold: 40,
+  rsiModerateOverbought: 60,
+
+  // Williams %R Thresholds (range: -100 to 0)
+  williamsROverbought: -20,
+  williamsRModerateOverbought: -30,
+  williamsROversold: -80,
+  williamsRModerateOversold: -70,
+
+  // Score Thresholds for Recommendations
+  strongBuyThreshold: 75,
+  buyThreshold: 60,
+  sellThreshold: 45,
+  strongSellThreshold: 30,
+
+  // Score Adjustments - RSI
+  rsiOversoldScore: 25,
+  rsiModerateOversoldScore: 15,
+  rsiOverboughtScore: -25,
+  rsiModerateOverboughtScore: -15,
+
+  // Score Adjustments - Williams %R
+  williamsROverboughtScore: -30,
+  williamsRModerateOverboughtScore: -15,
+  williamsROversoldScore: 20,
+  williamsRModerateOversoldScore: 10,
+
+  // Exit Strategy
+  takeProfitPercent: 5,
+  stopLossPercent: -8,
+  trailingStopActivation: 1.5,
+  trailingStopPercent: 1,
+
+  // Volume Filters
+  highVolumeRatio: 1.5,
+  lowVolumeRatio: 0.7,
+  volumeSpikRatio: 2.0,
+
+  // Momentum Thresholds
+  bigMoveThreshold: 3,
+  smallMoveThreshold: 2,
+
+  // Time Filters
+  lateSessionHour: 14,
+  lateSessionMinute: 30,
+  morningSessionEndHour: 11,
+
+  // Morning Reversal Thresholds
+  morningReversalStrong: 0.8,
+  morningReversalModerate: 0.5,
+
+  // Consecutive Down Periods
+  consecutiveDownStrong: 3,
+  consecutiveDownModerate: 2,
+
+  // Resample Interval (minutes) - 0 or null means no resampling
+  resampleMinutes: 30
+};
+
+/**
+ * Resample OHLCV data to a larger interval
+ * @param {Array} data - Array of OHLCV data points
+ * @param {number} intervalMinutes - Target interval in minutes (e.g., 60 for 1-hour)
+ * @returns {Array} Resampled data
+ */
+function resampleOHLCV(data, intervalMinutes) {
+  if (!data.length) return [];
+
+  const resampled = [];
+  let currentCandle = null;
+
+  for (const point of data) {
+    // Parse timestamp to get the interval bucket
+    const [datePart, timePart] = point.datetime.split(' ');
+    const [hour, minute] = timePart.split(':').map(Number);
+    const totalMinutes = hour * 60 + minute;
+    const bucketMinute = Math.floor(totalMinutes / intervalMinutes) * intervalMinutes;
+    const bucketHour = Math.floor(bucketMinute / 60);
+    const bucketMin = bucketMinute % 60;
+    const bucketTime = `${String(bucketHour).padStart(2, '0')}:${String(bucketMin).padStart(2, '0')}:00`;
+    const bucketDatetime = `${datePart} ${bucketTime}`;
+
+    if (!currentCandle || currentCandle.datetime !== bucketDatetime) {
+      // Start new candle
+      if (currentCandle) {
+        resampled.push(currentCandle);
+      }
+      currentCandle = {
+        date: datePart,
+        datetime: bucketDatetime,
+        open: point.open,
+        high: point.high,
+        low: point.low,
+        close: point.close,
+        volume: point.volume
+      };
+    } else {
+      // Update existing candle
+      currentCandle.high = Math.max(currentCandle.high, point.high);
+      currentCandle.low = Math.min(currentCandle.low, point.low);
+      currentCandle.close = point.close;
+      currentCandle.volume += point.volume;
+    }
+  }
+
+  // Don't forget the last candle
+  if (currentCandle) {
+    resampled.push(currentCandle);
+  }
+
+  return resampled;
+}
+
+/**
+ * Load historical data from a CSV file
+ * Expected CSV format: timestamp,open,high,low,close,volume
+ * @param {string} filePath - Path to the CSV file
+ * @param {number} resampleMinutes - Optional: resample to this interval (e.g., 60 for 1-hour)
+ * @returns {Array} Historical data array in backtest format
+ */
+function loadHistoricalDataFromCSV(filePath, resampleMinutes = null) {
+  console.log(`  📁 Loading data from CSV file: ${filePath}`);
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`CSV file not found: ${filePath}`);
+  }
+
+  const fileContent = fs.readFileSync(filePath, 'utf8');
+  const lines = fileContent.trim().split('\n');
+
+  // Skip header line
+  const header = lines[0].toLowerCase();
+  const hasHeader = header.includes('timestamp') || header.includes('open');
+  const dataLines = hasHeader ? lines.slice(1) : lines;
+
+  console.log(`  ✓ Found ${dataLines.length} data rows`);
+
+  let data = dataLines.map((line, index) => {
+    const parts = line.split(',');
+    if (parts.length < 6) {
+      console.warn(`  ⚠️  Skipping malformed line ${index + 1}: ${line}`);
+      return null;
+    }
+
+    const timestamp = parts[0].trim();
+    const datePart = timestamp.split(' ')[0]; // Extract YYYY-MM-DD
+
+    return {
+      date: datePart,
+      datetime: timestamp,
+      open: parseFloat(parts[1]),
+      high: parseFloat(parts[2]),
+      low: parseFloat(parts[3]),
+      close: parseFloat(parts[4]),
+      volume: parseInt(parts[5])
+    };
+  }).filter(item => item !== null);
+
+  // Sort by datetime
+  data.sort((a, b) => a.datetime.localeCompare(b.datetime));
+
+  // Resample if requested
+  if (resampleMinutes && resampleMinutes > 1) {
+    console.log(`  🔄 Resampling to ${resampleMinutes}-minute intervals...`);
+    data = resampleOHLCV(data, resampleMinutes);
+    console.log(`  ✓ Resampled to ${data.length} candles`);
+  }
+
+  console.log(`  ✓ Loaded ${data.length} data points from CSV`);
+  console.log(`  ✓ Date range: ${data[0].datetime} to ${data[data.length - 1].datetime}`);
+
+  return data;
+}
+
 // Ensure cache directory exists
 if (!fs.existsSync(CACHE_DIR)) {
   fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -270,65 +458,86 @@ async function fetchDailyDataFallback(ticker, apiKey, forceRefresh = false) {
 /**
  * Calculate technical indicators for a specific date
  * (Uses same logic as server.js)
+ * @param {Array} historicalData - Array of OHLCV data
+ * @param {number} index - Current index in the data
+ * @param {Object} config - Indicator configuration (uses DEFAULT_INDICATOR_CONFIG if not provided)
  */
-function calculateIndicators(historicalData, index) {
-  const prices = historicalData.slice(0, index + 1).map(d => d.close).reverse();
-  const highs = historicalData.slice(0, index + 1).map(d => d.high).reverse();
-  const lows = historicalData.slice(0, index + 1).map(d => d.low).reverse();
-  const volumes = historicalData.slice(0, index + 1).map(d => d.volume).reverse();
-  const dataPoints = historicalData.slice(0, index + 1).reverse();
+function calculateIndicators(historicalData, index, config = {}) {
+  // Merge provided config with defaults
+  const cfg = { ...DEFAULT_INDICATOR_CONFIG, ...config };
+
+  // Optimization: Only slice the most recent data we need (based on longest SMA period)
+  // This reduces O(n²) complexity to O(n) for large datasets
+  const LOOKBACK = Math.max(cfg.smaLongPeriod, cfg.smaShortPeriod, cfg.macdSlow) + 10;
+  const startIdx = Math.max(0, index - LOOKBACK + 1);
+  const windowData = historicalData.slice(startIdx, index + 1);
+
+  // Build arrays from the window (reversed so index 0 is most recent)
+  const prices = [];
+  const highs = [];
+  const lows = [];
+  const volumes = [];
+  const dataPoints = []; // Full data objects in reversed order for time-of-day filters
+  for (let i = windowData.length - 1; i >= 0; i--) {
+    prices.push(windowData[i].close);
+    highs.push(windowData[i].high);
+    lows.push(windowData[i].low);
+    volumes.push(windowData[i].volume);
+    dataPoints.push(windowData[i]);
+  }
+
   const currentPrice = prices[0];
   const currentVolume = volumes[0];
   const currentData = dataPoints[0];
 
   // RSI
-  const rsi = calculateRSI(prices);
+  const rsi = calculateRSI(prices, cfg.rsiPeriod);
 
   // Williams %R (returns -100 to 0; above -20 = overbought, below -80 = oversold)
-  const williamsR = calculateWilliamsR(highs, lows, prices);
+  const williamsR = calculateWilliamsR(highs, lows, prices, cfg.williamsRPeriod);
 
   // Moving Averages
-  const sma20 = calculateSMA(prices, 20);
-  const sma50 = calculateSMA(prices, 50);
+  const smaShort = calculateSMA(prices, cfg.smaShortPeriod);
+  const smaLong = calculateSMA(prices, cfg.smaLongPeriod);
 
   // MACD
-  const macd = calculateMACD(prices);
+  const macd = calculateMACD(prices, cfg.macdFast, cfg.macdSlow);
 
   // NEW STRATEGY: Buy LOW with reversal UP, Sell HIGH with reversal DOWN
   let score = 50;
 
   // 1. RSI - Strong contrarian signal (MOST IMPORTANT)
-  if (rsi < 30) {
+  if (rsi < cfg.rsiOversold) {
     // Oversold = price is LOW → Strong BUY signal
-    score += 25;
-  } else if (rsi < 40) {
+    score += cfg.rsiOversoldScore;
+  } else if (rsi < cfg.rsiModerateOversold) {
     // Getting oversold → Moderate BUY signal
-    score += 15;
-  } else if (rsi > 70) {
+    score += cfg.rsiModerateOversoldScore;
+  } else if (rsi > cfg.rsiOverbought) {
     // Overbought = price is HIGH → Strong SELL signal
-    score -= 25;
-  } else if (rsi > 60) {
+    score += cfg.rsiOverboughtScore;
+  } else if (rsi > cfg.rsiModerateOverbought) {
     // Getting overbought → Moderate SELL signal
-    score -= 15;
+    score += cfg.rsiModerateOverboughtScore;
   }
 
   // 1b. Williams %R - Confirms RSI overbought/oversold (range: -100 to 0)
   // Above -20 = Overbought, Below -80 = Oversold
   // CRITICAL: Williams %R is a hard gate - strongly overbought BLOCKS buying
   let williamsRBlock = false;
-  if (williamsR > -20) {
+  if (williamsR > cfg.williamsROverbought) {
     // Strongly overbought - price near period high → NEVER BUY
-    score -= 30;
+    score += cfg.williamsROverboughtScore;
     williamsRBlock = true; // Flag to enforce hard cap later
-  } else if (williamsR > -30) {
+  } else if (williamsR > cfg.williamsRModerateOverbought) {
     // Getting overbought → Strong SELL signal
-    score -= 15;
-  } else if (williamsR < -80) {
+    score += cfg.williamsRModerateOverboughtScore;
+  } else if (williamsR < cfg.williamsROversold) {
     // Strongly oversold - price near period low → BUY signal
-    score += 20;
-  } else if (williamsR < -70) {
+    score += cfg.williamsROversoldScore;
+  } else if (williamsR < cfg.williamsRModerateOversold) {
     // Getting oversold → Moderate BUY signal
-    score += 10;
+    score += cfg.williamsRModerateOversoldScore;
   }
 
   // 1c. RSI + Williams %R Agreement (strong confirmation)
@@ -344,29 +553,29 @@ function calculateIndicators(historicalData, index) {
   // 2. Moving Averages - REVERSED (buy when below, sell when above)
   // Price BELOW averages = CHEAP = Good to BUY
   // Price ABOVE averages = EXPENSIVE = Good to SELL
-  if (sma20 && sma50) {
-    const distanceFrom20 = ((currentPrice - sma20) / sma20) * 100;
-    const distanceFrom50 = ((currentPrice - sma50) / sma50) * 100;
+  if (smaShort && smaLong) {
+    const distanceFromShort = ((currentPrice - smaShort) / smaShort) * 100;
+    const distanceFromLong = ((currentPrice - smaLong) / smaLong) * 100;
 
     // Below both averages = undervalued (BUY)
-    if (currentPrice < sma20 && currentPrice < sma50) {
+    if (currentPrice < smaShort && currentPrice < smaLong) {
       score += 15;
     }
     // Above both averages = overvalued (SELL)
-    else if (currentPrice > sma20 && currentPrice > sma50) {
+    else if (currentPrice > smaShort && currentPrice > smaLong) {
       score -= 15;
     }
 
-    // Golden Cross (SMA20 crosses above SMA50) = Early uptrend reversal
-    if (sma20 > sma50) {
-      const crossoverStrength = ((sma20 - sma50) / sma50) * 100;
+    // Golden Cross (SMA short crosses above SMA long) = Early uptrend reversal
+    if (smaShort > smaLong) {
+      const crossoverStrength = ((smaShort - smaLong) / smaLong) * 100;
       if (crossoverStrength < 2) { // Recent crossover
         score += 10;
       }
     }
-    // Death Cross (SMA20 crosses below SMA50) = Early downtrend reversal
-    else if (sma20 < sma50) {
-      const crossoverStrength = ((sma50 - sma20) / sma50) * 100;
+    // Death Cross (SMA short crosses below SMA long) = Early downtrend reversal
+    else if (smaShort < smaLong) {
+      const crossoverStrength = ((smaLong - smaShort) / smaLong) * 100;
       if (crossoverStrength < 2) { // Recent crossover
         score -= 10;
       }
@@ -542,15 +751,15 @@ function calculateIndicators(historicalData, index) {
     technicalScore: Math.round(score),
     rsi,
     williamsR,
-    sma20,
-    sma50,
+    sma20: smaShort,  // Keep sma20/sma50 names for backward compatibility
+    sma50: smaLong,
     macd,
     currentPrice,
     // Falling knife filter data
     volumeRatio,
     priceDropToday,
     consecutiveDownPeriods,
-    williamsRBlock: williamsR > -20, // Flag indicating hard block was applied
+    williamsRBlock: williamsR > cfg.williamsROverbought,
     morningReversalBlock,
     dropFromTodayHigh
   };
@@ -583,11 +792,11 @@ function calculateSMA(prices, period) {
   return sum / period;
 }
 
-function calculateMACD(prices) {
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
-  if (!ema12 || !ema26) return null;
-  return ema12 - ema26;
+function calculateMACD(prices, fastPeriod = 12, slowPeriod = 26) {
+  const emaFast = calculateEMA(prices, fastPeriod);
+  const emaSlow = calculateEMA(prices, slowPeriod);
+  if (!emaFast || !emaSlow) return null;
+  return emaFast - emaSlow;
 }
 
 function calculateEMA(prices, period) {
@@ -628,12 +837,15 @@ function calculateWilliamsR(highs, lows, closes, period = 14) {
 /**
  * Generate recommendation based on master score
  * For backtesting, we use technical score only (sentiment/fundamental not available historically)
+ * @param {number} technicalScore - The calculated technical score
+ * @param {Object} config - Indicator configuration with threshold values
  */
-function generateRecommendation(technicalScore) {
-  if (technicalScore >= 75) return 'STRONG BUY';
-  if (technicalScore >= 60) return 'BUY';
-  if (technicalScore < 45 && technicalScore >= 30) return 'SELL';
-  if (technicalScore < 30) return 'STRONG SELL';
+function generateRecommendation(technicalScore, config = {}) {
+  const cfg = { ...DEFAULT_INDICATOR_CONFIG, ...config };
+  if (technicalScore >= cfg.strongBuyThreshold) return 'STRONG BUY';
+  if (technicalScore >= cfg.buyThreshold) return 'BUY';
+  if (technicalScore < cfg.sellThreshold && technicalScore >= cfg.strongSellThreshold) return 'SELL';
+  if (technicalScore < cfg.strongSellThreshold) return 'STRONG SELL';
   return 'HOLD';
 }
 
@@ -742,6 +954,8 @@ function generateRationale(recommendation, indicators, currentPrice, action, pro
 /**
  * Run backtest simulation
  * @param {Object} config - Backtest configuration
+ * @param {Object} config.dataSource - Optional data source: { type: 'file', path: '/path/to/file.csv', resampleMinutes: 30 } or { type: 'api' }
+ * @param {Object} config.indicatorConfig - Optional indicator configuration (overrides DEFAULT_INDICATOR_CONFIG)
  */
 async function runBacktest(config) {
   const {
@@ -751,13 +965,19 @@ async function runBacktest(config) {
     initialInvestment, // Per stock
     buyPercentages, // { 'STRONG BUY': 100, 'BUY': 100, 'SELL': 100, 'STRONG SELL': 100 }
     apiKey,
-    forceRefresh = false
+    forceRefresh = false,
+    dataSource = { type: 'api' }, // Default to API if not specified
+    indicatorConfig = {} // User-provided indicator config overrides
   } = config;
+
+  // Merge user config with defaults
+  const indConfig = { ...DEFAULT_INDICATOR_CONFIG, ...indicatorConfig };
 
   console.log(`\n🔄 Starting backtest for ${tickers.length} stocks...`);
   console.log(`📅 Period: ${startDate} to ${endDate}`);
   console.log(`💰 Initial investment per stock: £${initialInvestment}`);
-  if (forceRefresh) {
+  console.log(`📁 Data source: ${dataSource.type === 'file' ? `CSV file (${dataSource.path})` : 'API/Cache'}`);
+  if (forceRefresh && dataSource.type === 'api') {
     console.log(`🔄 Force refresh: Fetching fresh data from API`);
   }
 
@@ -767,8 +987,13 @@ async function runBacktest(config) {
     console.log(`\n📊 Processing ${ticker}...`);
 
     try {
-      // Fetch historical intraday data
-      const historicalData = await fetchHistoricalData(ticker, apiKey, startDate, endDate, forceRefresh);
+      // Fetch historical data based on data source type
+      let historicalData;
+      if (dataSource.type === 'file') {
+        historicalData = loadHistoricalDataFromCSV(dataSource.path, dataSource.resampleMinutes);
+      } else {
+        historicalData = await fetchHistoricalData(ticker, apiKey, startDate, endDate, forceRefresh);
+      }
 
       // Filter by date range
       const filteredData = historicalData.filter(d => {
@@ -782,7 +1007,7 @@ async function runBacktest(config) {
       console.log(`  ✓ Filtered to ${filteredData.length} data points in backtest range`);
 
       // Run simulation
-      const simulation = simulateTrades(ticker, filteredData, historicalData, initialInvestment, buyPercentages);
+      const simulation = simulateTrades(ticker, filteredData, historicalData, initialInvestment, buyPercentages, indConfig);
       results.push(simulation);
 
       console.log(`  ✓ Final value: £${simulation.finalValue.toFixed(2)} (${simulation.returnPercent >= 0 ? '+' : ''}${simulation.returnPercent.toFixed(2)}%)`);
@@ -809,8 +1034,9 @@ async function runBacktest(config) {
 
 /**
  * Simulate trades for a single stock
+ * @param {Object} indConfig - Indicator configuration
  */
-function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestment, buyPercentages) {
+function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestment, buyPercentages, indConfig = {}) {
   let cash = initialInvestment;
   let shares = 0;
   let averageBuyPrice = 0; // Track our entry price
@@ -854,8 +1080,8 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
     if (fullDataIndex === -1 || fullDataIndex < 50) continue; // Need enough history for indicators
 
     // Calculate indicators (now includes volume analysis)
-    const indicators = calculateIndicators(fullHistoricalData, fullDataIndex);
-    const recommendation = generateRecommendation(indicators.technicalScore);
+    const indicators = calculateIndicators(fullHistoricalData, fullDataIndex, indConfig);
+    const recommendation = generateRecommendation(indicators.technicalScore, indConfig);
 
     // Calculate profit/loss if we have shares
     const profitPercent = shares > 0 ? ((currentPrice - averageBuyPrice) / averageBuyPrice) * 100 : 0;
@@ -869,7 +1095,11 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
     const recentHigh = Math.max(...recentData.map(d => d.high));
 
     // Execute trades based on recommendation
-    if ((recommendation === 'STRONG BUY' || recommendation === 'BUY') && cash > 0) {
+    // BUY FILTER: Don't buy when extremely overbought (RSI > 75 AND Williams %R > -10)
+    // This allows buying during normal uptrends but avoids buying at extreme tops
+    const extremelyOverbought = indicators.rsi > 75 && indicators.williamsR && indicators.williamsR > -10;
+
+    if ((recommendation === 'STRONG BUY' || recommendation === 'BUY') && cash > 0 && !extremelyOverbought) {
       const percentage = buyPercentages[recommendation] || 100;
       const investAmount = (cash * percentage) / 100;
       const sharesToBuy = Math.floor(investAmount / currentPrice);
@@ -917,10 +1147,11 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
       // Only check enhanced exits when we have a SELL/STRONG SELL recommendation OR profit conditions met
       const hasSellSignal = recommendation === 'STRONG SELL' || recommendation === 'SELL';
 
-      // 1. TAKE PROFIT (lowered from 3% to 2%) - requires sell signal to confirm
-      if (profitPercent >= 2 && hasSellSignal) {
+      // 1. TAKE PROFIT - requires sell signal AND RSI not oversold (don't sell bounces)
+      // Raised threshold to 3% and require RSI > 45 to avoid selling during reversals
+      if (profitPercent >= 3 && hasSellSignal && indicators.rsi > 45) {
         shouldSell = true;
-        exitReason = 'take-profit (2%+ gain)';
+        exitReason = 'take-profit (3%+ gain)';
       }
 
       // 2. STOP LOSS (unchanged at -8%) - triggers regardless of signal
@@ -930,7 +1161,8 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
       }
 
       // 2b. TAKE PROFIT at higher threshold (5%+) - can trigger without sell signal
-      if (profitPercent >= 5) {
+      // But don't sell if RSI is deeply oversold (< 35) - could be a major reversal
+      if (profitPercent >= 5 && indicators.rsi > 35) {
         shouldSell = true;
         exitReason = 'take-profit (5%+ gain)';
       }
@@ -956,24 +1188,33 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
       }
 
       // 5. VOLUME DIVERGENCE (declining volume at price highs)
-      const volumeDecreasing = currentVolume < avgVolume * 0.7;
+      // Only trigger with stronger confirmation: RSI > 55, profit > 2%, and MACD turning negative
+      const volumeDecreasing = currentVolume < avgVolume * 0.6; // More significant volume drop
       const priceNearHigh = currentPrice > recentHigh * 0.995;
-      if (volumeDecreasing && priceNearHigh && profitPercent > 1 && hasSellSignal) {
+      const rsiElevated = indicators.rsi > 55; // Higher RSI threshold
+      const macdWeakening = indicators.macd !== null && indicators.macd < 0.5;
+      if (volumeDecreasing && priceNearHigh && profitPercent > 2 && hasSellSignal && rsiElevated && macdWeakening) {
         shouldSell = true;
         exitReason = 'volume divergence (low volume at highs)';
       }
 
-      // 6. INTRADAY REVERSAL (1% drop from day's high)
+      // 6. INTRADAY REVERSAL (1.5% drop from day's high)
+      // Require: larger drop (1.5%), RSI not oversold (> 45), and some profit (> 0.5%)
       const dropFromDayHigh = currentDayHigh > 0 ? ((currentDayHigh - currentPrice) / currentDayHigh) * 100 : 0;
-      if (dropFromDayHigh > 1 && profitPercent > 0 && hasSellSignal) {
+      const rsiAllowsIntradaySell = indicators.rsi > 45;
+      if (dropFromDayHigh > 1.5 && profitPercent > 0.5 && hasSellSignal && rsiAllowsIntradaySell) {
         shouldSell = true;
         exitReason = `intraday reversal (${dropFromDayHigh.toFixed(1)}% drop from day high)`;
       }
 
       // 7. VOLUME SPIKE DETECTION (distribution signal)
-      const volumeSpike = currentVolume > avgVolume * 2;
+      // Only trigger when RSI is elevated (> 60) AND Williams %R confirms overbought
+      // This avoids selling during oversold bounces with high volume
+      const volumeSpike = currentVolume > avgVolume * 2.5; // Higher threshold
       const nearRecentHigh = currentPrice > recentHigh * 0.98;
-      if (volumeSpike && nearRecentHigh && profitPercent > 0.5 && hasSellSignal) {
+      const rsiOverbought = indicators.rsi > 60;
+      const williamsConfirms = indicators.williamsR && indicators.williamsR > -40;
+      if (volumeSpike && nearRecentHigh && profitPercent > 1.5 && hasSellSignal && rsiOverbought && williamsConfirms) {
         shouldSell = true;
         exitReason = 'distribution volume spike at highs';
       }
@@ -1048,6 +1289,32 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
   const returnPercent = ((finalValue - initialInvestment) / initialInvestment) * 100;
   const buyAndHoldReturn = ((buyAndHoldValue - initialInvestment) / initialInvestment) * 100;
 
+  // Sample price history for charting (max 500 data points to keep response size manageable)
+  const maxChartPoints = 500;
+  const sampleInterval = Math.max(1, Math.floor(tradingData.length / maxChartPoints));
+  const priceHistory = [];
+
+  for (let i = 0; i < tradingData.length; i += sampleInterval) {
+    const d = tradingData[i];
+    priceHistory.push({
+      datetime: d.datetime || d.date,
+      close: d.close,
+      high: d.high,
+      low: d.low
+    });
+  }
+
+  // Ensure we include the last data point
+  if (priceHistory.length > 0 && priceHistory[priceHistory.length - 1].datetime !== tradingData[tradingData.length - 1].datetime) {
+    const lastData = tradingData[tradingData.length - 1];
+    priceHistory.push({
+      datetime: lastData.datetime || lastData.date,
+      close: lastData.close,
+      high: lastData.high,
+      low: lastData.low
+    });
+  }
+
   return {
     ticker,
     initialInvestment,
@@ -1060,6 +1327,7 @@ function simulateTrades(ticker, tradingData, fullHistoricalData, initialInvestme
     finalShares: shares,
     finalShareValue: shares * endPrice,
     trades,
+    priceHistory, // Added for charting
     buyAndHold: {
       finalValue: buyAndHoldValue,
       returnPercent: buyAndHoldReturn,
@@ -1112,5 +1380,7 @@ function calculatePortfolioSummary(results, initialInvestmentPerStock) {
 
 module.exports = {
   runBacktest,
-  fetchHistoricalData
+  fetchHistoricalData,
+  loadHistoricalDataFromCSV,
+  DEFAULT_INDICATOR_CONFIG
 };
