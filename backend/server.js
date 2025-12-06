@@ -796,6 +796,93 @@ app.post('/api/backtest', async (req, res) => {
   }
 });
 
+// ========== REAL-TIME MONITOR ENDPOINTS ==========
+
+const realTimeMonitor = require('./realTimeMonitor');
+
+// Get monitor status and current signals
+app.get('/api/monitor/status', (req, res) => {
+  try {
+    const status = realTimeMonitor.getStatus();
+    const signals = realTimeMonitor.getSignals();
+    res.json({ ...status, signals });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Start monitoring
+app.post('/api/monitor/start', async (req, res) => {
+  try {
+    const result = await realTimeMonitor.startMonitor();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Stop monitoring
+app.post('/api/monitor/stop', (req, res) => {
+  try {
+    const result = realTimeMonitor.stopMonitor();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get monitor configuration
+app.get('/api/monitor/config', (req, res) => {
+  try {
+    const config = realTimeMonitor.getConfig();
+    res.json(config);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update monitor configuration
+app.post('/api/monitor/config', (req, res) => {
+  try {
+    const newConfig = req.body;
+    const result = realTimeMonitor.updateConfig(newConfig);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get historical signals
+app.get('/api/monitor/signals', (req, res) => {
+  try {
+    const signals = realTimeMonitor.getSignals();
+    res.json({ signals });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Manually trigger a check (for testing)
+app.post('/api/monitor/check', async (req, res) => {
+  try {
+    const result = await realTimeMonitor.manualCheck();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get monitor logs
+app.get('/api/monitor/logs', (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const logs = realTimeMonitor.readLogs(limit);
+    res.json({ logs });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 const PORT = 3001;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🚀 Server running on http://0.0.0.0:${PORT}`);

@@ -121,6 +121,13 @@
               <span id="darkModeIcon">🌙</span>
             </button>
             <button
+              id="monitorBtn"
+              class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2"
+            >
+              <span>📡</span>
+              <span>Real-Time Monitor</span>
+            </button>
+            <button
               id="backtestBtn"
               class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 flex items-center gap-2"
             >
@@ -895,6 +902,179 @@
     </div>
   </div>
 
+  <!-- Real-Time Monitor Modal -->
+  <div id="monitorModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+      <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-6 flex justify-between items-center">
+        <div>
+          <h2 class="text-2xl font-bold text-gray-800 dark:text-gray-100">📡 Real-Time Monitor</h2>
+          <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">Monitor stocks in real-time with email alerts for buy/sell signals</p>
+        </div>
+        <button id="closeMonitorBtn" class="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 text-2xl">&times;</button>
+      </div>
+
+      <div id="monitorContent" class="p-6">
+        <!-- Monitor Status -->
+        <div class="mb-6 p-4 rounded-lg border" id="monitorStatusCard">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div id="monitorStatusIndicator" class="w-4 h-4 rounded-full bg-gray-400"></div>
+              <div>
+                <span id="monitorStatusText" class="font-semibold text-gray-800 dark:text-gray-100">Not Running</span>
+                <p id="monitorStatusDetail" class="text-xs text-gray-500 dark:text-gray-400"></p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button id="startMonitorBtn" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center gap-2">
+                <span>▶</span>
+                <span>Start</span>
+              </button>
+              <button id="stopMonitorBtn" class="hidden px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2">
+                <span>⏹</span>
+                <span>Stop</span>
+              </button>
+              <button id="manualCheckBtn" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                <span>🔄</span>
+                <span>Check Now</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Configuration Section -->
+        <div class="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+          <button type="button" onclick="toggleMonitorSection('monitorConfigSection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+            <span class="font-semibold text-gray-800 dark:text-gray-100">Configuration</span>
+            <span id="monitorConfigSection-arrow" class="text-gray-500">▼</span>
+          </button>
+          <div id="monitorConfigSection" class="p-4 space-y-4">
+            <!-- Tickers -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Tickers to Monitor (comma separated)
+              </label>
+              <input
+                type="text"
+                id="monitorTickers"
+                placeholder="e.g., AAPL, MSFT, GOOGL"
+                class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg"
+                value="AAPL, MSFT, GOOGL"
+              />
+            </div>
+
+            <!-- Interval -->
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Check Interval (minutes)
+              </label>
+              <select id="monitorInterval" class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-lg">
+                <option value="15">15 minutes</option>
+                <option value="30" selected>30 minutes</option>
+                <option value="60">1 hour</option>
+              </select>
+            </div>
+
+            <!-- Email Settings -->
+            <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Email Alerts</h4>
+
+              <div class="flex items-center gap-2 mb-3">
+                <input type="checkbox" id="emailEnabled" class="rounded">
+                <label for="emailEnabled" class="text-sm text-gray-700 dark:text-gray-300">Enable email alerts</label>
+              </div>
+
+              <div id="emailSettings" class="hidden space-y-3">
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Gmail Address</label>
+                  <input type="email" id="emailUser" placeholder="your-email@gmail.com" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" />
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Gmail App Password</label>
+                  <input type="password" id="emailPassword" placeholder="xxxx-xxxx-xxxx-xxxx" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" />
+                  <p class="text-xs text-gray-500 mt-1">Generate at: Google Account → Security → 2FA → App Passwords</p>
+                </div>
+                <div>
+                  <label class="block text-xs text-gray-600 dark:text-gray-400 mb-1">Recipient Email</label>
+                  <input type="email" id="emailRecipient" placeholder="alerts@example.com" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded text-sm" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Alert Types -->
+            <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Alert Types</h4>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input type="checkbox" id="alertStrongBuy" checked class="rounded">
+                  <span class="text-green-600 font-semibold">STRONG BUY</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input type="checkbox" id="alertBuy" checked class="rounded">
+                  <span class="text-green-500">BUY</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input type="checkbox" id="alertStrongSell" checked class="rounded">
+                  <span class="text-red-600 font-semibold">STRONG SELL</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input type="checkbox" id="alertSell" class="rounded">
+                  <span class="text-red-500">SELL</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Save Config Button -->
+            <div class="pt-4">
+              <button id="saveMonitorConfigBtn" class="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                Save Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Current Signals -->
+        <div class="mb-6">
+          <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">Current Signals</h3>
+          <div id="monitorSignals" class="space-y-3">
+            <p class="text-gray-500 dark:text-gray-400 text-center py-8">No signals yet. Start the monitor to begin tracking.</p>
+          </div>
+        </div>
+
+        <!-- Alert History -->
+        <div class="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+          <button type="button" onclick="toggleMonitorSection('alertHistorySection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+            <span class="font-semibold text-gray-800 dark:text-gray-100">Alert History</span>
+            <span id="alertHistorySection-arrow" class="text-gray-500">▶</span>
+          </button>
+          <div id="alertHistorySection" class="hidden p-4">
+            <div id="alertHistory" class="space-y-2">
+              <p class="text-gray-500 dark:text-gray-400 text-sm">No alerts sent yet.</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Activity Log -->
+        <div class="mb-6 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+          <button type="button" onclick="toggleMonitorSection('activityLogSection')" class="w-full flex justify-between items-center p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 transition">
+            <span class="font-semibold text-gray-800 dark:text-gray-100">Activity Log</span>
+            <span id="activityLogSection-arrow" class="text-gray-500">▶</span>
+          </button>
+          <div id="activityLogSection" class="hidden p-4">
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-xs text-gray-500 dark:text-gray-400">Showing last 50 entries</span>
+              <button id="refreshLogsBtn" class="text-xs px-2 py-1 bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-500">
+                Refresh
+              </button>
+            </div>
+            <div id="activityLog" class="max-h-96 overflow-y-auto space-y-1 font-mono text-xs">
+              <p class="text-gray-500 dark:text-gray-400">No log entries yet.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Load JavaScript modules -->
   <script src="js/darkMode.js"></script>
   <script src="js/api.js"></script>
@@ -903,6 +1083,7 @@
   <script src="js/sentiment.js"></script>
   <script src="js/analysis.js"></script>
   <script src="js/backtest.js"></script>
+  <script src="js/monitor.js"></script>
   <script src="js/main.js"></script>
 </body>
 </html>
