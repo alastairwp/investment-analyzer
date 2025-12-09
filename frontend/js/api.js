@@ -1,6 +1,8 @@
 // API module - handles all backend communication
 
-const API_BASE_URL = 'http://localhost:3001/api';
+// Dynamically construct API URL based on current host
+// This allows the app to work on any host without hardcoded IPs
+const API_BASE_URL = `${window.location.protocol}//${window.location.hostname}:3001/api`;
 
 // Make API_BASE_URL available globally
 window.API_BASE_URL = API_BASE_URL;

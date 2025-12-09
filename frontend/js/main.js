@@ -31,7 +31,7 @@ window.addEventListener('load', () => {
  */
 async function checkMockMode() {
   try {
-    const response = await fetch('http://localhost:3001/api/health');
+    const response = await fetch(`${API_BASE_URL}/health`);
     const data = await response.json();
     
     if (data.dataSource === 'mock') {
@@ -117,7 +117,7 @@ async function showSuggestions() {
   `;
 
   try {
-    const response = await fetch('http://localhost:3001/api/suggestions');
+    const response = await fetch(`${API_BASE_URL}/suggestions`);
     const data = await response.json();
 
     if (!response.ok) {
