@@ -197,22 +197,79 @@
               </div>
               <p id="lastUpdated" class="text-xs text-gray-500 dark:text-gray-400 mt-2"></p>
             </div>
-            <div class="text-right">
-              <div id="recommendation" class="text-2xl font-bold mb-2"></div>
-              <div id="confidence" class="text-sm text-gray-600 dark:text-gray-400 mb-3"></div>
-              <button
+            <button
                 id="addToWatchlistBtn"
                 class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm flex items-center gap-2"
               >
                 <span>⭐</span>
                 <span>Add to Watchlist</span>
               </button>
-            </div>
           </div>
 
-          <!-- Technical Score -->
-          <div id="allScores" class="mb-6">
-            <!-- Scores will be inserted here -->
+          <!-- Timeframe Recommendations -->
+          <div id="timeframeRecommendations" class="mb-6">
+            <h3 class="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">Recommendation by Timeframe</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="timeframeBoxes">
+              <!-- Short-term Box -->
+              <div id="shortTermBox" class="rounded-lg border-2 p-4 transition-all">
+                <div class="flex justify-between items-start mb-3">
+                  <div>
+                    <h4 class="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase">Short-Term</h4>
+                    <p class="text-xs text-gray-500 dark:text-gray-500" id="shortTermPeriod">1-5 days</p>
+                  </div>
+                  <div class="w-12 h-12 rounded-full flex items-center justify-center" id="shortTermScoreCircle">
+                    <span class="text-lg font-bold text-white" id="shortTermScore">--</span>
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <span id="shortTermRec" class="text-xl font-bold">--</span>
+                  <span id="shortTermConfidence" class="text-xs text-gray-500 ml-2">--</span>
+                </div>
+                <div id="shortTermSignals" class="space-y-1 text-xs">
+                  <!-- Signals will be inserted here -->
+                </div>
+              </div>
+
+              <!-- Mid-term Box -->
+              <div id="midTermBox" class="rounded-lg border-2 p-4 transition-all">
+                <div class="flex justify-between items-start mb-3">
+                  <div>
+                    <h4 class="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase">Mid-Term</h4>
+                    <p class="text-xs text-gray-500 dark:text-gray-500" id="midTermPeriod">1-4 weeks</p>
+                  </div>
+                  <div class="w-12 h-12 rounded-full flex items-center justify-center" id="midTermScoreCircle">
+                    <span class="text-lg font-bold text-white" id="midTermScore">--</span>
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <span id="midTermRec" class="text-xl font-bold">--</span>
+                  <span id="midTermConfidence" class="text-xs text-gray-500 ml-2">--</span>
+                </div>
+                <div id="midTermSignals" class="space-y-1 text-xs">
+                  <!-- Signals will be inserted here -->
+                </div>
+              </div>
+
+              <!-- Long-term Box -->
+              <div id="longTermBox" class="rounded-lg border-2 p-4 transition-all">
+                <div class="flex justify-between items-start mb-3">
+                  <div>
+                    <h4 class="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase">Long-Term</h4>
+                    <p class="text-xs text-gray-500 dark:text-gray-500" id="longTermPeriod">1-6 months</p>
+                  </div>
+                  <div class="w-12 h-12 rounded-full flex items-center justify-center" id="longTermScoreCircle">
+                    <span class="text-lg font-bold text-white" id="longTermScore">--</span>
+                  </div>
+                </div>
+                <div class="mb-3">
+                  <span id="longTermRec" class="text-xl font-bold">--</span>
+                  <span id="longTermConfidence" class="text-xs text-gray-500 ml-2">--</span>
+                </div>
+                <div id="longTermSignals" class="space-y-1 text-xs">
+                  <!-- Signals will be inserted here -->
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Summary -->

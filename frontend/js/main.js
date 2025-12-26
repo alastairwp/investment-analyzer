@@ -153,16 +153,21 @@ function displaySuggestions(suggestions) {
 
   suggestionsContent.innerHTML = `
     <div class="grid gap-4">
-      ${suggestions.map((stock, index) => `
-        <div class="border ${getMasterScoreBorder(stock.masterScore)} rounded-lg p-4 hover:shadow-md transition cursor-pointer"
+      ${suggestions.map((stock, index) => {
+        const shortScore = stock.timeframes?.shortTerm?.score ?? 50;
+        const midScore = stock.timeframes?.midTerm?.score ?? 50;
+        const longScore = stock.timeframes?.longTerm?.score ?? 50;
+        const midRec = stock.timeframes?.midTerm?.recommendation ?? 'HOLD';
+        return `
+        <div class="border ${getMasterScoreBorder(midScore)} rounded-lg p-4 hover:shadow-md transition cursor-pointer"
              onclick="selectSuggestion('${stock.ticker}')">
           <div class="flex items-start justify-between">
             <div class="flex-1">
               <div class="flex items-center gap-3 mb-2">
                 <span class="text-lg font-bold text-gray-800">#${index + 1}</span>
                 <span class="text-xl font-bold text-gray-900">${stock.ticker}</span>
-                <span class="px-2 py-1 rounded text-xs font-semibold ${getRecommendationBadge(stock.recommendation)}">
-                  ${stock.recommendation}
+                <span class="px-2 py-1 rounded text-xs font-semibold ${getRecommendationBadge(midRec)}">
+                  ${midRec}
                 </span>
               </div>
               <div class="flex items-baseline gap-3 mb-3">
@@ -171,33 +176,29 @@ function displaySuggestions(suggestions) {
                   ${parseFloat(stock.change) >= 0 ? '+' : ''}${stock.change.toFixed(2)} (${stock.changePercent})
                 </span>
               </div>
-              <div class="grid grid-cols-4 gap-2 text-xs">
+              <div class="grid grid-cols-3 gap-2 text-xs">
                 <div class="bg-blue-50 rounded px-2 py-1">
-                  <div class="text-blue-600 font-medium">Master</div>
-                  <div class="text-blue-900 font-bold">${stock.masterScore}</div>
+                  <div class="text-blue-600 font-medium">Short</div>
+                  <div class="text-blue-900 font-bold">${shortScore}</div>
                 </div>
-                <div class="bg-gray-50 rounded px-2 py-1">
-                  <div class="text-gray-600 font-medium">Technical</div>
-                  <div class="text-gray-900 font-bold">${stock.technicalScore}</div>
+                <div class="bg-green-50 rounded px-2 py-1">
+                  <div class="text-green-600 font-medium">Mid</div>
+                  <div class="text-green-900 font-bold">${midScore}</div>
                 </div>
-                <div class="bg-gray-50 rounded px-2 py-1">
-                  <div class="text-gray-600 font-medium">Sentiment</div>
-                  <div class="text-gray-900 font-bold">${stock.sentimentScore}</div>
-                </div>
-                <div class="bg-gray-50 rounded px-2 py-1">
-                  <div class="text-gray-600 font-medium">Fundamental</div>
-                  <div class="text-gray-900 font-bold">${stock.fundamentalScore}</div>
+                <div class="bg-purple-50 rounded px-2 py-1">
+                  <div class="text-purple-600 font-medium">Long</div>
+                  <div class="text-purple-900 font-bold">${longScore}</div>
                 </div>
               </div>
             </div>
             <div class="ml-4">
-              <div class="w-16 h-16 rounded-full ${getMasterScoreColor(stock.masterScore)} flex items-center justify-center">
-                <span class="text-2xl font-bold text-white">${stock.masterScore}</span>
+              <div class="w-16 h-16 rounded-full ${getMasterScoreColor(midScore)} flex items-center justify-center">
+                <span class="text-2xl font-bold text-white">${midScore}</span>
               </div>
             </div>
           </div>
         </div>
-      `).join('')}
+      `}).join('')}
     </div>
   `;
 }

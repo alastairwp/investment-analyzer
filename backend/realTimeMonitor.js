@@ -138,10 +138,10 @@ const lastSignals = {};  // { ticker: { recommendation, score, datetime } }
 const alertHistory = []; // Array of sent alerts
 
 /**
- * Fetch intraday prices from AlphaVantage
+ * Fetch daily prices from AlphaVantage (free tier compatible)
  */
-async function fetchIntradayPrices(ticker, apiKey, interval = '30min') {
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=${ticker}&interval=${interval}&outputsize=full&apikey=${apiKey}`;
+async function fetchDailyPrices(ticker, apiKey) {
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${ticker}&outputsize=compact&apikey=${apiKey}`;
 
   try {
     const response = await fetch(url);
@@ -155,15 +155,15 @@ async function fetchIntradayPrices(ticker, apiKey, interval = '30min') {
       throw new Error('API rate limit reached. Please wait and try again.');
     }
 
-    const timeSeries = data[`Time Series (${interval})`];
+    const timeSeries = data['Time Series (Daily)'];
     if (!timeSeries) {
       throw new Error('No data returned from API');
     }
 
     // Convert to our format
-    const prices = Object.entries(timeSeries).map(([datetime, values]) => ({
-      datetime,
-      date: datetime.split(' ')[0],
+    const prices = Object.entries(timeSeries).map(([date, values]) => ({
+      datetime: date,
+      date: date,
       open: parseFloat(values['1. open']),
       high: parseFloat(values['2. high']),
       low: parseFloat(values['3. low']),
@@ -418,11 +418,11 @@ function shouldAlert(config, ticker, newSignal) {
  * Monitor a single ticker
  */
 async function monitorTicker(ticker, config) {
-  writeLog('INFO', `Fetching price data for ${ticker}`);
+  writeLog('INFO', `Fetching daily price data for ${ticker}`);
 
   try {
-    // Fetch latest prices
-    const prices = await fetchIntradayPrices(ticker, config.alphaVantageApiKey, '30min');
+    // Fetch latest daily prices (free tier compatible)
+    const prices = await fetchDailyPrices(ticker, config.alphaVantageApiKey);
 
     if (prices.length < 50) {
       writeLog('WARN', `Not enough data for ${ticker}`, { dataPoints: prices.length });
@@ -549,6 +549,7 @@ let monitorInterval = null;
  * Start the monitoring service
  */
 function startMonitor(customConfig = null) {
+  // Load fresh config
   const config = customConfig || loadConfig();
 
   if (!config.alphaVantageApiKey) {
@@ -568,12 +569,13 @@ function startMonitor(customConfig = null) {
     emailEnabled: config.email.enabled
   });
 
-  // Run immediately
-  runMonitoringCycle(config);
+  // Run immediately with current config
+  runMonitoringCycle(loadConfig());
 
-  // Set up interval
+  // Set up interval - reload config each time so changes take effect
   monitorInterval = setInterval(() => {
-    runMonitoringCycle(config);
+    const freshConfig = loadConfig();
+    runMonitoringCycle(freshConfig);
   }, config.intervalMinutes * 60 * 1000);
 
   return { success: true, message: 'Monitor started', tickers: config.tickers, intervalMinutes: config.intervalMinutes };

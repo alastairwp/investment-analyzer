@@ -137,35 +137,36 @@ function showError(message) {
 function displayResults(data) {
   resultsBox.classList.remove('hidden');
 
-  // Stock Info
-  document.getElementById('stockTicker').textContent = data.ticker;
-  document.getElementById('stockPrice').textContent = `${data.currentPrice.toFixed(2)}`;
-  
-  const change = parseFloat(data.change);
+  // Stock Info - with null checks for robustness
+  const tickerEl = document.getElementById('stockTicker');
+  const priceEl = document.getElementById('stockPrice');
   const changeEl = document.getElementById('stockChange');
-  changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${data.changePercent})`;
-  changeEl.className = `text-lg font-semibold ${change >= 0 ? 'text-green-600' : 'text-red-600'}`;
+  const lastUpdatedEl = document.getElementById('lastUpdated');
 
-  document.getElementById('lastUpdated').textContent = 
-    `Last updated: ${new Date(data.lastUpdated).toLocaleString()}`;
+  if (tickerEl) tickerEl.textContent = data.ticker;
+  if (priceEl) priceEl.textContent = `${data.currentPrice.toFixed(2)}`;
 
-  // Recommendation
-  const recEl = document.getElementById('recommendation');
-  recEl.textContent = data.recommendation;
-  const recColor = ['STRONG BUY', 'BUY'].includes(data.recommendation) ? 'text-green-600' :
-                    data.recommendation === 'HOLD' ? 'text-yellow-600' : 'text-red-600';
-  recEl.className = `text-2xl font-bold ${recColor}`;
-  
-  document.getElementById('confidence').textContent = `Confidence: ${data.confidence}`;
+  const change = parseFloat(data.change);
+  if (changeEl) {
+    changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${data.changePercent})`;
+    changeEl.className = `text-lg font-semibold ${change >= 0 ? 'text-green-600' : 'text-red-600'}`;
+  }
+
+  if (lastUpdatedEl) {
+    lastUpdatedEl.textContent = `Last updated: ${new Date(data.lastUpdated).toLocaleString()}`;
+  }
 
   // Update "Add to Watchlist" button
   updateWatchlistButton(data.ticker);
 
-  // Display all scores (Technical, Sentiment, Fundamental, Master)
-  displayAllScores(data);
+  // Display timeframe recommendations (Short, Mid, Long term)
+  if (data.timeframes) {
+    renderTimeframeRecommendations(data.timeframes);
+  }
 
-  // Summary
-  displaySummary(data.recommendation);
+  // Summary based on mid-term recommendation (most relevant for typical investors)
+  const midTermRec = data.timeframes?.midTerm?.recommendation || 'HOLD';
+  displaySummary(midTermRec);
 
   // Trading Signals
   displaySignals(data.signals);
@@ -175,7 +176,7 @@ function displayResults(data) {
 
   // Price Chart with indicators overlaid
   drawPriceChart(
-    data.historicalData, 
+    data.historicalData,
     {
       sma20: data.indicators.sma20 !== 'N/A' ? parseFloat(data.indicators.sma20) : null,
       sma50: data.indicators.sma50 !== 'N/A' ? parseFloat(data.indicators.sma50) : null
@@ -200,54 +201,132 @@ function updateWatchlistButton(ticker) {
 }
 
 /**
- * Display all scores (Master, Technical, Sentiment, Fundamental)
- * @param {Object} data - Stock analysis data
+ * Render timeframe recommendations (Short, Mid, Long term)
+ * @param {Object} timeframes - Timeframes object with shortTerm, midTerm, longTerm
  */
-function displayAllScores(data) {
-  const scoresHtml = `
-    <div class="grid grid-cols-4 gap-4">
-      <div class="bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/40 dark:to-blue-800/40 rounded-lg p-4 border-2 border-blue-300 dark:border-blue-700">
-        <div class="text-xs font-medium text-blue-700 dark:text-blue-300 mb-1">MASTER SCORE</div>
-        <div class="text-3xl font-bold text-blue-900 dark:text-blue-100">${data.masterScore}</div>
-        <div class="text-xs text-blue-600 dark:text-blue-400 mt-1">Overall Rating</div>
-      </div>
+function renderTimeframeRecommendations(timeframes) {
+  const { shortTerm, midTerm, longTerm } = timeframes;
 
-      <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-        <div class="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">TECHNICAL (40%)</div>
-        <div class="flex items-center gap-2">
-          <div class="text-2xl font-bold ${getScoreColor(data.technicalScore)}">${data.technicalScore}</div>
-          <div class="flex-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2">
-            <div class="${getScoreBarColor(data.technicalScore)} h-2 rounded-full"
-                 style="width: ${data.technicalScore}%"></div>
-          </div>
-        </div>
-      </div>
+  // Render each timeframe box
+  renderTimeframeBox('shortTerm', shortTerm);
+  renderTimeframeBox('midTerm', midTerm);
+  renderTimeframeBox('longTerm', longTerm);
+}
 
-      <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-        <div class="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">SENTIMENT (30%)</div>
-        <div class="flex items-center gap-2">
-          <div class="text-2xl font-bold ${getScoreColor(data.sentimentScore)}">${data.sentimentScore}</div>
-          <div class="flex-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2">
-            <div class="${getScoreBarColor(data.sentimentScore)} h-2 rounded-full"
-                 style="width: ${data.sentimentScore}%"></div>
-          </div>
-        </div>
-      </div>
+/**
+ * Render a single timeframe box
+ * @param {string} prefix - DOM element prefix (shortTerm, midTerm, longTerm)
+ * @param {Object} data - Timeframe data
+ */
+function renderTimeframeBox(prefix, data) {
+  if (!data) return;
 
-      <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-        <div class="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">FUNDAMENTAL (30%)</div>
-        <div class="flex items-center gap-2">
-          <div class="text-2xl font-bold ${getScoreColor(data.fundamentalScore)}">${data.fundamentalScore}</div>
-          <div class="flex-1 bg-gray-200 dark:bg-gray-600 rounded-full h-2">
-            <div class="${getScoreBarColor(data.fundamentalScore)} h-2 rounded-full"
-                 style="width: ${data.fundamentalScore}%"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  `;
+  const box = document.getElementById(`${prefix}Box`);
+  const scoreCircle = document.getElementById(`${prefix}ScoreCircle`);
+  const scoreEl = document.getElementById(`${prefix}Score`);
+  const recEl = document.getElementById(`${prefix}Rec`);
+  const confidenceEl = document.getElementById(`${prefix}Confidence`);
+  const signalsEl = document.getElementById(`${prefix}Signals`);
+  const periodEl = document.getElementById(`${prefix}Period`);
 
-  document.getElementById('allScores').innerHTML = scoresHtml;
+  // Set period
+  if (periodEl && data.period) {
+    periodEl.textContent = data.period;
+  }
+
+  // Set score
+  if (scoreEl) {
+    scoreEl.textContent = data.score;
+  }
+
+  // Style score circle based on score
+  if (scoreCircle) {
+    scoreCircle.className = `w-12 h-12 rounded-full flex items-center justify-center ${getTimeframeScoreCircleColor(data.score)}`;
+  }
+
+  // Style box based on recommendation
+  if (box) {
+    box.className = `rounded-lg border-2 p-4 transition-all ${getTimeframeBoxStyle(data.recommendation)}`;
+  }
+
+  // Set recommendation with color
+  if (recEl) {
+    recEl.textContent = data.recommendation;
+    recEl.className = `text-xl font-bold ${getTimeframeRecColor(data.recommendation)}`;
+  }
+
+  // Set confidence
+  if (confidenceEl) {
+    confidenceEl.textContent = data.confidence ? `(${data.confidence} confidence)` : '';
+  }
+
+  // Render signals
+  if (signalsEl && data.signals) {
+    signalsEl.innerHTML = data.signals.map(signal => {
+      const icon = signal.type === 'bullish' ? '↑' : signal.type === 'bearish' ? '↓' : '→';
+      const textColor = signal.type === 'bullish' ? 'text-green-600 dark:text-green-400' :
+                        signal.type === 'bearish' ? 'text-red-600 dark:text-red-400' :
+                        'text-gray-600 dark:text-gray-400';
+      return `<div class="${textColor}"><span class="font-bold">${icon}</span> ${signal.message}</div>`;
+    }).join('');
+  }
+}
+
+/**
+ * Get score circle background color class
+ * @param {number} score - Score (0-100)
+ * @returns {string} Tailwind background class
+ */
+function getTimeframeScoreCircleColor(score) {
+  if (score >= 75) return 'bg-green-500';
+  if (score >= 60) return 'bg-green-400';
+  if (score >= 45) return 'bg-yellow-500';
+  if (score >= 30) return 'bg-orange-500';
+  return 'bg-red-500';
+}
+
+/**
+ * Get box border and background style based on recommendation
+ * @param {string} recommendation - Recommendation text
+ * @returns {string} Tailwind classes
+ */
+function getTimeframeBoxStyle(recommendation) {
+  switch (recommendation) {
+    case 'STRONG BUY':
+      return 'border-green-400 bg-green-50 dark:bg-green-900/20 dark:border-green-600';
+    case 'BUY':
+      return 'border-green-300 bg-green-50/50 dark:bg-green-900/10 dark:border-green-700';
+    case 'HOLD':
+      return 'border-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 dark:border-yellow-600';
+    case 'SELL':
+      return 'border-red-300 bg-red-50/50 dark:bg-red-900/10 dark:border-red-700';
+    case 'STRONG SELL':
+      return 'border-red-400 bg-red-50 dark:bg-red-900/20 dark:border-red-600';
+    default:
+      return 'border-gray-300 bg-gray-50 dark:bg-gray-700 dark:border-gray-600';
+  }
+}
+
+/**
+ * Get recommendation text color
+ * @param {string} recommendation - Recommendation text
+ * @returns {string} Tailwind color class
+ */
+function getTimeframeRecColor(recommendation) {
+  switch (recommendation) {
+    case 'STRONG BUY':
+      return 'text-green-600 dark:text-green-400';
+    case 'BUY':
+      return 'text-green-500 dark:text-green-400';
+    case 'HOLD':
+      return 'text-yellow-600 dark:text-yellow-400';
+    case 'SELL':
+      return 'text-red-500 dark:text-red-400';
+    case 'STRONG SELL':
+      return 'text-red-600 dark:text-red-400';
+    default:
+      return 'text-gray-600 dark:text-gray-400';
+  }
 }
 
 /**
@@ -286,9 +365,12 @@ function displayNewsSection(sentimentData) {
  * @param {string} recommendation - Buy/Sell/Hold recommendation
  */
 function displaySummary(recommendation) {
+  const summaryEl = document.getElementById('summary');
+  if (!summaryEl) return;
+
   const sentiment = ['STRONG BUY', 'BUY'].includes(recommendation) ? 'bullish' :
                    recommendation === 'HOLD' ? 'neutral' : 'bearish';
-  document.getElementById('summary').textContent = 
+  summaryEl.textContent =
     ` Based on technical indicators including RSI, moving averages, and MACD, this stock shows ${sentiment} signals. Review the specific indicators and signals below before making decisions.`;
 }
 
@@ -298,6 +380,8 @@ function displaySummary(recommendation) {
  */
 function displayIndicators(indicators) {
   const indicatorsEl = document.getElementById('indicators');
+  if (!indicatorsEl) return;
+
   indicatorsEl.innerHTML = Object.entries(indicators).map(([key, value]) => `
     <div class="flex justify-between items-center border-b border-gray-200 pb-2">
       <div class="text-sm text-gray-600 font-medium">${key.toUpperCase()}</div>

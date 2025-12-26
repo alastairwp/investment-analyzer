@@ -206,52 +206,336 @@ function calculateWilliamsR(historicalData, period = 14) {
   return williamsR;
 }
 
+// ========== TIMEFRAME ANALYSIS FUNCTIONS ==========
+
+/**
+ * Analyze short-term outlook (1-5 days)
+ * Primary indicators: RSI, Momentum (5-day), Price vs SMA20, Williams %R
+ */
+function analyzeShortTerm(rsi, price, sma20, momentum, williamsR) {
+  let score = 50;
+  const signals = [];
+
+  // RSI analysis (high weight for short-term)
+  if (rsi < 30) {
+    score += 25;
+    signals.push({ type: 'bullish', message: 'RSI oversold - likely bounce expected' });
+  } else if (rsi < 40) {
+    score += 15;
+    signals.push({ type: 'bullish', message: 'RSI recovering from low levels' });
+  } else if (rsi > 70) {
+    score -= 25;
+    signals.push({ type: 'bearish', message: 'RSI overbought - pullback risk' });
+  } else if (rsi > 60) {
+    score -= 15;
+    signals.push({ type: 'bearish', message: 'RSI elevated - momentum may slow' });
+  }
+
+  // Momentum analysis (critical for short-term)
+  if (momentum > 3) {
+    score += 20;
+    signals.push({ type: 'bullish', message: `Strong momentum (+${momentum.toFixed(1)}% in 5 days)` });
+  } else if (momentum > 1) {
+    score += 10;
+    signals.push({ type: 'bullish', message: `Positive momentum (+${momentum.toFixed(1)}% in 5 days)` });
+  } else if (momentum < -3) {
+    score -= 20;
+    signals.push({ type: 'bearish', message: `Negative momentum (${momentum.toFixed(1)}% in 5 days)` });
+  } else if (momentum < -1) {
+    score -= 10;
+    signals.push({ type: 'bearish', message: `Slight weakness (${momentum.toFixed(1)}% in 5 days)` });
+  }
+
+  // Price vs SMA20 (short-term trend)
+  if (sma20) {
+    if (price > sma20) {
+      score += 15;
+      signals.push({ type: 'bullish', message: 'Price above 20-day moving average' });
+    } else {
+      score -= 15;
+      signals.push({ type: 'bearish', message: 'Price below 20-day moving average' });
+    }
+  }
+
+  // Williams %R analysis
+  if (williamsR !== null && williamsR !== undefined) {
+    if (williamsR < -80) {
+      score += 15;
+      signals.push({ type: 'bullish', message: 'Williams %R oversold - bounce likely' });
+    } else if (williamsR > -20) {
+      score -= 15;
+      signals.push({ type: 'bearish', message: 'Williams %R overbought - caution' });
+    }
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
+  return {
+    period: '1-5 days',
+    score: Math.round(score),
+    recommendation: getRecommendation(score),
+    confidence: getConfidence(score),
+    signals: signals.slice(0, 4) // Max 4 signals
+  };
+}
+
+/**
+ * Analyze mid-term outlook (1-4 weeks)
+ * Primary indicators: SMA20 vs SMA50 trend, MACD crossovers, RSI, Bollinger Bands
+ */
+function analyzeMidTerm(sma20, sma50, sma20Prev, sma50Prev, macd, macdFull, rsi, bollingerBands, price) {
+  let score = 50;
+  const signals = [];
+
+  // SMA20 vs SMA50 trend analysis
+  if (sma20 && sma50) {
+    const currentGap = sma20 - sma50;
+    const previousGap = (sma20Prev && sma50Prev) ? sma20Prev - sma50Prev : null;
+
+    if (sma20 > sma50) {
+      score += 20;
+      if (previousGap !== null && previousGap < 0) {
+        signals.push({ type: 'bullish', message: 'Recent golden cross - strong buy signal' });
+      } else {
+        signals.push({ type: 'bullish', message: 'Uptrend confirmed (SMA20 > SMA50)' });
+      }
+    } else {
+      score -= 10;
+      if (previousGap !== null && currentGap > previousGap) {
+        // Gap narrowing = recovery
+        score += 15;
+        signals.push({ type: 'bullish', message: 'SMA20 rising towards SMA50 - recovery forming' });
+      } else if (previousGap !== null && previousGap > 0) {
+        signals.push({ type: 'bearish', message: 'Recent death cross - trend reversal' });
+      } else {
+        signals.push({ type: 'bearish', message: 'Downtrend (SMA20 < SMA50)' });
+      }
+    }
+  }
+
+  // MACD analysis
+  if (macd !== null) {
+    if (macd > 0) {
+      score += 15;
+      signals.push({ type: 'bullish', message: 'MACD positive - bullish momentum' });
+    } else {
+      score -= 10;
+      // Check if MACD is improving (converging toward zero)
+      if (macdFull && macdFull.histogram && macdFull.histogram.length > 5) {
+        const recentHist = macdFull.histogram.slice(-5).filter(h => h !== null);
+        if (recentHist.length >= 2 && recentHist[recentHist.length - 1] > recentHist[0]) {
+          score += 10;
+          signals.push({ type: 'bullish', message: 'MACD histogram improving - momentum building' });
+        } else {
+          signals.push({ type: 'bearish', message: 'MACD negative - bearish momentum' });
+        }
+      }
+    }
+  }
+
+  // Bollinger Bands position
+  if (bollingerBands && bollingerBands.upper.length > 0) {
+    const latestUpper = bollingerBands.upper[bollingerBands.upper.length - 1];
+    const latestLower = bollingerBands.lower[bollingerBands.lower.length - 1];
+    const latestMiddle = bollingerBands.middle[bollingerBands.middle.length - 1];
+
+    if (latestUpper && latestLower && latestMiddle) {
+      if (price >= latestUpper * 0.98) {
+        score -= 10;
+        signals.push({ type: 'bearish', message: 'At upper Bollinger Band - overbought' });
+      } else if (price <= latestLower * 1.02) {
+        score += 10;
+        signals.push({ type: 'bullish', message: 'At lower Bollinger Band - bounce potential' });
+      } else if (price > latestMiddle) {
+        score += 5;
+      }
+    }
+  }
+
+  // RSI mid-range stability
+  if (rsi >= 40 && rsi <= 60) {
+    score += 5;
+    signals.push({ type: 'neutral', message: 'RSI in healthy range (40-60)' });
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
+  return {
+    period: '1-4 weeks',
+    score: Math.round(score),
+    recommendation: getRecommendation(score),
+    confidence: getConfidence(score),
+    signals: signals.slice(0, 4)
+  };
+}
+
+/**
+ * Analyze long-term outlook (1-6 months)
+ * Primary indicators: SMA50 vs SMA200 trend, Overall price trend, Fundamentals
+ */
+function analyzeLongTerm(sma50, sma200, sma50Prev, sma200Prev, price, fundamentals) {
+  let score = 50;
+  const signals = [];
+
+  // Technical component (60% weight conceptually)
+
+  // SMA50 vs SMA200 trend (major trend indicator)
+  if (sma50 && sma200) {
+    const currentGap = sma50 - sma200;
+    const previousGap = (sma50Prev && sma200Prev) ? sma50Prev - sma200Prev : null;
+
+    if (sma50 > sma200) {
+      score += 20;
+      signals.push({ type: 'bullish', message: 'Long-term uptrend (SMA50 > SMA200)' });
+    } else {
+      score -= 15;
+      if (previousGap !== null && currentGap > previousGap) {
+        // SMA50 rising towards SMA200 = major recovery
+        score += 15;
+        signals.push({ type: 'bullish', message: 'SMA50 rising towards SMA200 - major recovery' });
+      } else {
+        signals.push({ type: 'bearish', message: 'Long-term downtrend (SMA50 < SMA200)' });
+      }
+    }
+  } else if (!sma200) {
+    signals.push({ type: 'neutral', message: 'Insufficient data for 200-day SMA' });
+  }
+
+  // Price vs SMA200
+  if (sma200) {
+    if (price > sma200) {
+      score += 10;
+      signals.push({ type: 'bullish', message: 'Price above 200-day average' });
+    } else {
+      score -= 10;
+      signals.push({ type: 'bearish', message: 'Price below 200-day average' });
+    }
+  }
+
+  // Fundamental component (40% weight conceptually)
+  if (fundamentals) {
+    const pe = parseFloat(fundamentals.peRatio);
+    const marketCap = parseFloat(fundamentals.marketCap);
+
+    if (pe > 0) {
+      if (pe < 15) {
+        score += 15;
+        signals.push({ type: 'bullish', message: `Attractive P/E ratio (${pe.toFixed(1)})` });
+      } else if (pe >= 15 && pe <= 25) {
+        score += 10;
+        signals.push({ type: 'neutral', message: `Fair P/E ratio (${pe.toFixed(1)})` });
+      } else if (pe > 35) {
+        score -= 10;
+        signals.push({ type: 'bearish', message: `High P/E ratio (${pe.toFixed(1)}) - expensive` });
+      }
+    }
+
+    if (marketCap > 50) {
+      score += 10;
+      signals.push({ type: 'bullish', message: 'Large cap - lower volatility risk' });
+    }
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
+  return {
+    period: '1-6 months',
+    score: Math.round(score),
+    recommendation: getRecommendation(score),
+    confidence: getConfidence(score),
+    signals: signals.slice(0, 4)
+  };
+}
+
+/**
+ * Get recommendation based on score
+ */
+function getRecommendation(score) {
+  if (score >= 75) return 'STRONG BUY';
+  if (score >= 60) return 'BUY';
+  if (score >= 45) return 'HOLD';
+  if (score >= 30) return 'SELL';
+  return 'STRONG SELL';
+}
+
+/**
+ * Get confidence level based on score distance from neutral
+ */
+function getConfidence(score) {
+  const distance = Math.abs(score - 50);
+  if (distance >= 25) return 'High';
+  if (distance >= 15) return 'Medium';
+  return 'Low';
+}
+
+// ========== TECHNICAL ANALYSIS ==========
+
 function analyzeTechnicals(historicalData) {
   const prices = historicalData.map(d => d.price).reverse();
   const currentPrice = prices[0];
-  
+
   const rsi = calculateRSI(prices);
   const sma20 = calculateSMA(prices, 20);
   const sma50 = calculateSMA(prices, 50);
+  const sma200 = calculateSMA(prices, 200);
   const macd = calculateMACD(prices);
-  
+
+  // Calculate SMA values from 5 days ago to determine trend direction
+  const pricesPrev = prices.slice(5); // Shift by 5 days
+  const sma20Prev = pricesPrev.length >= 20 ? calculateSMA(pricesPrev, 20) : null;
+  const sma50Prev = pricesPrev.length >= 50 ? calculateSMA(pricesPrev, 50) : null;
+  const sma200Prev = pricesPrev.length >= 200 ? calculateSMA(pricesPrev, 200) : null;
+
   // Calculate advanced indicators
   const bollingerBands = calculateBollingerBands(prices, 20, 2);
   const macdFull = calculateMACDFull(prices);
   const williamsR = calculateWilliamsR(historicalData.slice().reverse(), 14);
+
+  // Calculate 5-day momentum
+  const recentPrices = prices.slice(0, 5);
+  const momentum = ((recentPrices[0] - recentPrices[4]) / recentPrices[4]) * 100;
   
+  // Get latest Williams %R value
+  const latestWilliamsR = williamsR[williamsR.length - 1];
+
+  // Calculate timeframe-specific analyses
+  const shortTermAnalysis = analyzeShortTerm(rsi, currentPrice, sma20, momentum, latestWilliamsR);
+  const midTermAnalysis = analyzeMidTerm(sma20, sma50, sma20Prev, sma50Prev, macd, macdFull, rsi, bollingerBands, currentPrice);
+  const longTermAnalysis = analyzeLongTerm(sma50, sma200, sma50Prev, sma200Prev, currentPrice, null); // fundamentals added later
+
+  // Legacy score calculation (kept for backwards compatibility during transition)
   let score = 50;
-  
+
   if (rsi < 30) score += 20;
   else if (rsi > 70) score -= 20;
   else if (rsi >= 40 && rsi <= 60) score += 10;
-  
+
   if (sma20 && currentPrice > sma20) score += 10;
   else if (sma20 && currentPrice < sma20) score -= 10;
-  
+
   if (sma50 && currentPrice > sma50) score += 10;
   else if (sma50 && currentPrice < sma50) score -= 10;
-  
+
   if (macd && macd > 0) score += 10;
   else if (macd && macd < 0) score -= 10;
-  
-  const recentPrices = prices.slice(0, 5);
-  const momentum = ((recentPrices[0] - recentPrices[4]) / recentPrices[4]) * 100;
+
   if (momentum > 2) score += 10;
   else if (momentum < -2) score -= 10;
-  
+
   score = Math.max(0, Math.min(100, score));
-  
+
   return {
     score: Math.round(score),
     indicators: {
       rsi: rsi.toFixed(2),
       sma20: sma20?.toFixed(2) || 'N/A',
       sma50: sma50?.toFixed(2) || 'N/A',
+      sma200: sma200?.toFixed(2) || 'N/A',
       macd: macd?.toFixed(2) || 'N/A',
-      momentum: momentum.toFixed(2) + '%'
+      momentum: momentum.toFixed(2) + '%',
+      williamsR: latestWilliamsR?.toFixed(2) || 'N/A'
     },
-    signals: generateSignals(rsi, currentPrice, sma20, sma50, macd),
+    signals: generateSignals(rsi, currentPrice, sma20, sma50, macd, sma20Prev, sma50Prev),
     advancedIndicators: {
       bollingerBands: {
         upper: bollingerBands.upper.reverse(),
@@ -264,28 +548,67 @@ function analyzeTechnicals(historicalData) {
         histogram: macdFull.histogram.reverse()
       },
       williamsR: williamsR.reverse()
+    },
+    timeframes: {
+      shortTerm: shortTermAnalysis,
+      midTerm: midTermAnalysis,
+      longTerm: longTermAnalysis
+    },
+    rawIndicators: {
+      rsi, sma20, sma50, sma200, macd, momentum, williamsR: latestWilliamsR,
+      sma20Prev, sma50Prev, sma200Prev
     }
   };
 }
 
-function generateSignals(rsi, price, sma20, sma50, macd) {
+function generateSignals(rsi, price, sma20, sma50, macd, sma20Prev = null, sma50Prev = null) {
   const signals = [];
-  
+
   if (rsi < 30) signals.push({ type: 'bullish', message: 'RSI indicates oversold conditions' });
   if (rsi > 70) signals.push({ type: 'bearish', message: 'RSI indicates overbought conditions' });
-  
-  if (sma20 && sma50 && sma20 > sma50) {
-    signals.push({ type: 'bullish', message: 'Golden cross pattern (SMA20 > SMA50)' });
-  } else if (sma20 && sma50 && sma20 < sma50) {
-    signals.push({ type: 'bearish', message: 'Death cross pattern (SMA20 < SMA50)' });
+
+  // SMA Cross analysis with TREND consideration
+  if (sma20 && sma50) {
+    const currentGap = sma20 - sma50;
+    const previousGap = (sma20Prev && sma50Prev) ? sma20Prev - sma50Prev : null;
+
+    if (sma20 > sma50) {
+      // Golden cross exists
+      if (previousGap !== null && previousGap < 0) {
+        // Just crossed - recent golden cross
+        signals.push({ type: 'bullish', message: 'Recent golden cross - SMA20 just crossed above SMA50 (strong bullish signal)' });
+      } else if (previousGap !== null && currentGap > previousGap) {
+        // Gap widening - strengthening uptrend
+        signals.push({ type: 'bullish', message: 'Golden cross strengthening - gap between SMA20 and SMA50 widening (bullish momentum)' });
+      } else if (previousGap !== null && currentGap < previousGap) {
+        // Gap narrowing - weakening uptrend
+        signals.push({ type: 'neutral', message: 'Golden cross weakening - SMA20 declining towards SMA50 (momentum slowing)' });
+      } else {
+        signals.push({ type: 'bullish', message: 'Golden cross pattern (SMA20 > SMA50)' });
+      }
+    } else if (sma20 < sma50) {
+      // Death cross exists - but check the TREND
+      if (previousGap !== null && previousGap > 0) {
+        // Just crossed - recent death cross
+        signals.push({ type: 'bearish', message: 'Recent death cross - SMA20 just crossed below SMA50 (strong bearish signal)' });
+      } else if (previousGap !== null && currentGap < previousGap) {
+        // Gap widening (more negative) - strengthening downtrend
+        signals.push({ type: 'bearish', message: 'Death cross strengthening - gap between SMA20 and SMA50 widening (bearish momentum)' });
+      } else if (previousGap !== null && currentGap > previousGap) {
+        // Gap narrowing - SMA20 rising towards SMA50 = RECOVERY
+        signals.push({ type: 'bullish', message: 'Recovery trend - SMA20 rising towards SMA50, potential golden cross forming (bullish reversal signal)' });
+      } else {
+        signals.push({ type: 'bearish', message: 'Death cross pattern (SMA20 < SMA50)' });
+      }
+    }
   }
-  
+
   if (macd && macd > 0) signals.push({ type: 'bullish', message: 'MACD above zero' });
   if (macd && macd < 0) signals.push({ type: 'bearish', message: 'MACD below zero' });
-  
+
   if (sma20 && price > sma20) signals.push({ type: 'bullish', message: 'Price above 20-day average' });
   if (sma20 && price < sma20) signals.push({ type: 'bearish', message: 'Price below 20-day average' });
-  
+
   return signals;
 }
 
@@ -321,46 +644,39 @@ function calculateMasterScore(technicalScore, sentimentScore, fundamentalScore) 
 
 async function analyzeWithMock(ticker) {
   console.log(`[MOCK] Analyzing ${ticker}...`);
-  
+
   const mockData = await analyzeMock(ticker);
-  
+
   // Perform technical analysis on mock data
   const technical = analyzeTechnicals(mockData.historicalData);
   const fundamentalScore = calculateFundamentalScore(mockData.fundamentals);
   const sentimentScore = mockData.sentiment.overallScore;
-  const masterScore = calculateMasterScore(technical.score, sentimentScore, fundamentalScore);
-  
-  let recommendation = 'HOLD';
-  let confidence = 'Medium';
-  
-  if (masterScore >= 75) {
-    recommendation = 'STRONG BUY';
-    confidence = 'High';
-  } else if (masterScore >= 60) {
-    recommendation = 'BUY';
-  } else if (masterScore < 45 && masterScore >= 30) {
-    recommendation = 'SELL';
-  } else if (masterScore < 30) {
-    recommendation = 'STRONG SELL';
-    confidence = 'High';
+
+  // Update long-term analysis with fundamentals
+  const timeframes = { ...technical.timeframes };
+  if (mockData.fundamentals && technical.rawIndicators) {
+    timeframes.longTerm = analyzeLongTerm(
+      technical.rawIndicators.sma50,
+      technical.rawIndicators.sma200,
+      technical.rawIndicators.sma50Prev,
+      technical.rawIndicators.sma200Prev,
+      mockData.currentPrice,
+      mockData.fundamentals
+    );
   }
-  
+
   return {
     ticker,
     currentPrice: mockData.currentPrice,
     change: mockData.change,
     changePercent: mockData.changePercent,
-    technicalScore: technical.score,
-    sentimentScore: sentimentScore,
-    fundamentalScore: fundamentalScore,
-    masterScore: masterScore,
-    recommendation,
-    confidence,
+    timeframes,
     indicators: technical.indicators,
     signals: technical.signals,
     advancedIndicators: technical.advancedIndicators,
     sentiment: mockData.sentiment,
-    historicalData: mockData.historicalData, // Send ALL data (90 days)
+    fundamentals: mockData.fundamentals,
+    historicalData: mockData.historicalData,
     lastUpdated: new Date().toISOString()
   };
 }
@@ -418,39 +734,32 @@ async function analyzeWithFinnhub(ticker) {
   // Perform technical analysis
   const technical = analyzeTechnicals(historicalData);
   const fundamentalScore = calculateFundamentalScore(fundamentals);
-  const masterScore = calculateMasterScore(technical.score, sentimentScore, fundamentalScore);
-  
-  // Generate recommendation
-  let recommendation = 'HOLD';
-  let confidence = 'Medium';
-  
-  if (masterScore >= 75) {
-    recommendation = 'STRONG BUY';
-    confidence = 'High';
-  } else if (masterScore >= 60) {
-    recommendation = 'BUY';
-  } else if (masterScore < 45 && masterScore >= 30) {
-    recommendation = 'SELL';
-  } else if (masterScore < 30) {
-    recommendation = 'STRONG SELL';
-    confidence = 'High';
+
+  // Update long-term analysis with fundamentals
+  const timeframes = { ...technical.timeframes };
+  if (fundamentals && technical.rawIndicators) {
+    timeframes.longTerm = analyzeLongTerm(
+      technical.rawIndicators.sma50,
+      technical.rawIndicators.sma200,
+      technical.rawIndicators.sma50Prev,
+      technical.rawIndicators.sma200Prev,
+      quote.currentPrice,
+      fundamentals
+    );
   }
-  
+
   return {
     ticker,
     currentPrice: quote.currentPrice,
     change: quote.change,
     changePercent: quote.changePercent,
-    technicalScore: technical.score,
-    sentimentScore: sentimentScore,
-    fundamentalScore: fundamentalScore,
-    masterScore: masterScore,
-    recommendation,
-    confidence,
+    timeframes,
     indicators: technical.indicators,
     signals: technical.signals,
+    advancedIndicators: technical.advancedIndicators,
     sentiment: sentimentData,
-    historicalData: historicalData.slice(-30),
+    fundamentals,
+    historicalData: historicalData.slice(-90),
     lastUpdated: new Date().toISOString()
   };
 }
@@ -508,41 +817,22 @@ async function analyzeWithAlphaVantage(ticker) {
   })).reverse();
   
   const technical = analyzeTechnicals(historicalData);
-  const fundamentalScore = 50; // Alpha Vantage overview would go here
-  const sentimentScore = 50; // Would fetch news/sentiment here
-  const masterScore = calculateMasterScore(technical.score, sentimentScore, fundamentalScore);
-  
-  let recommendation = 'HOLD';
-  let confidence = 'Medium';
-  
-  if (masterScore >= 75) {
-    recommendation = 'STRONG BUY';
-    confidence = 'High';
-  } else if (masterScore >= 60) {
-    recommendation = 'BUY';
-  } else if (masterScore < 45 && masterScore >= 30) {
-    recommendation = 'SELL';
-  } else if (masterScore < 30) {
-    recommendation = 'STRONG SELL';
-    confidence = 'High';
-  }
-  
+
+  // Timeframes from technical analysis (no fundamentals for Alpha Vantage basic)
+  const timeframes = technical.timeframes;
+
   return {
     ticker,
     currentPrice,
     change,
     changePercent,
-    technicalScore: technical.score,
-    sentimentScore,
-    fundamentalScore,
-    masterScore,
-    recommendation,
-    confidence,
+    timeframes,
     indicators: technical.indicators,
     signals: technical.signals,
     advancedIndicators: technical.advancedIndicators,
     sentiment: null,
-    historicalData: historicalData, // Send all available data
+    fundamentals: null,
+    historicalData: historicalData,
     lastUpdated: new Date().toISOString()
   };
 }
@@ -592,14 +882,11 @@ app.get('/api/suggestions', async (req, res) => {
         const response = await axios.get(`http://localhost:3001/api/analyze/${ticker}`);
         const data = response.data;
         
-        if (data.masterScore >= 60) {
+        const midScore = data.timeframes?.midTerm?.score ?? 50;
+        if (midScore >= 60) {
           suggestions.push({
             ticker: data.ticker,
-            masterScore: data.masterScore,
-            technicalScore: data.technicalScore,
-            sentimentScore: data.sentimentScore,
-            fundamentalScore: data.fundamentalScore,
-            recommendation: data.recommendation,
+            timeframes: data.timeframes,
             currentPrice: data.currentPrice,
             change: data.change,
             changePercent: data.changePercent
@@ -609,8 +896,8 @@ app.get('/api/suggestions', async (req, res) => {
         console.log(`Skipping ${ticker}`);
       }
     }
-    
-    suggestions.sort((a, b) => b.masterScore - a.masterScore);
+
+    suggestions.sort((a, b) => (b.timeframes?.midTerm?.score ?? 50) - (a.timeframes?.midTerm?.score ?? 50));
     res.json({ suggestions: suggestions.slice(0, 10) });
     
   } catch (error) {

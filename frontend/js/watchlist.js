@@ -143,8 +143,10 @@ function renderWatchlistError(ticker, errorMsg) {
  */
 function renderWatchlistItem(data) {
   const change = parseFloat(data.change);
-  const scoreColor = data.technicalScore >= 70 ? 'bg-green-500' : 
-                     data.technicalScore >= 50 ? 'bg-yellow-500' : 'bg-red-500';
+  // Use mid-term score for watchlist display (or fall back to 50)
+  const midTermScore = data.timeframes?.midTerm?.score ?? 50;
+  const scoreColor = midTermScore >= 70 ? 'bg-green-500' :
+                     midTermScore >= 50 ? 'bg-yellow-500' : 'bg-red-500';
   const changeColor = change >= 0 ? 'text-green-600' : 'text-red-600';
 
   // Find or create the item element
@@ -177,9 +179,9 @@ function renderWatchlistItem(data) {
 
     <div class="flex items-center gap-2 text-xs">
       <div class="flex-1 bg-gray-200 dark:bg-gray-600 rounded-full h-1.5">
-        <div class="${scoreColor} h-1.5 rounded-full" style="width: ${data.technicalScore}%"></div>
+        <div class="${scoreColor} h-1.5 rounded-full" style="width: ${midTermScore}%"></div>
       </div>
-      <span class="font-semibold text-gray-700 dark:text-gray-300">${data.technicalScore}</span>
+      <span class="font-semibold text-gray-700 dark:text-gray-300">${midTermScore}</span>
     </div>
 
     <div class="text-xs text-gray-500 dark:text-gray-400 mt-1">
